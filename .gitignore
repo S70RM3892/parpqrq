@@ -8,3 +8,4 @@ build/
 export_credentials.cfg
 /_capture/
 assets/source/textures/
+.claude/worktrees/
