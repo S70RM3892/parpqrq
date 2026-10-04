@@ -11,7 +11,7 @@ var _failed := 0
 func _ready() -> void:
 	await _run()
 	print("SMOKE TEST: %s" % ("PASS" if _failed == 0 else "FAIL (%d)" % _failed))
-	get_tree().quit(1 if _failed > 0 else 0)
+	Audio.quit_game(1 if _failed > 0 else 0)
 
 
 func _run() -> void:

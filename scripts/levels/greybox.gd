@@ -3,10 +3,9 @@ class_name Greybox
 extends Node3D
 ## 白い箱だけのテストコース（M1の手触り検証用）。_layout() の数値を書き換えれば形が変わる。
 ## 箱1つ = [中心, 大きさ, ルート色か, Y回転(度), X回転(度), 種類]。ルート色 = 使える足場・縁（仕様書 6章）。
+## 箱は LevelGeometry で材質ごとにまとめて描く。
 ## 種類（省略可）: SOLID = 見た目＋当たり判定、VISUAL = 見た目だけ、COLLIDER = 当たり判定だけ（見えない坂など）
 
-const WHITE := Color(0.92, 0.92, 0.9)
-const ROUTE := Color("#FF6A1A")
 const LANE := 4.0  ## 主ルートの幅
 const STEP_RISE := 0.4
 const STEP_RUN := 0.8
@@ -80,32 +79,16 @@ func _stairs(z0: float, steps: int) -> Array[Array]:
 func _build() -> void:
 	for c: Node in get_children():
 		c.queue_free()
-	var white := _material(WHITE)
-	var route := _material(ROUTE)
+	var geo := LevelGeometry.new()
+	geo.name = "Geometry"
 	for b: Array in _layout():
-		var size: Vector3 = b[1]
 		var kind: Kind = b[5] if b.size() > 5 else Kind.SOLID
-		var root: Node3D = StaticBody3D.new() if kind != Kind.VISUAL else Node3D.new()
-		root.position = b[0]
-		root.rotation_degrees = Vector3(b[4], b[3], 0.0)
-		if kind != Kind.VISUAL:
-			var shape := CollisionShape3D.new()
-			var box_shape := BoxShape3D.new()
-			box_shape.size = size
-			shape.shape = box_shape
-			root.add_child(shape)
-		if kind != Kind.COLLIDER:
-			var mesh := MeshInstance3D.new()
-			var box_mesh := BoxMesh.new()
-			box_mesh.size = size
-			mesh.mesh = box_mesh
-			mesh.material_override = route if b[2] else white
-			root.add_child(mesh)
-		add_child(root)
-
-
-func _material(c: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c
-	m.roughness = 0.9
-	return m
+		var flags := 0
+		if kind == Kind.VISUAL:
+			flags = LevelGeometry.NO_COLLIDE
+		elif kind == Kind.COLLIDER:
+			flags = LevelGeometry.NO_VISUAL
+		var mat := LevelStyle.Mat.ROUTE if b[2] else LevelStyle.Mat.WHITE
+		geo.add_box(b[0], b[1], mat, Vector3(b[4], b[3], 0.0), flags)
+	geo.build()
+	add_child(geo)

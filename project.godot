@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 Settings="*res://scripts/autoload/settings.gd"
 Haptics="*res://scripts/autoload/haptics.gd"
+Audio="*res://scripts/autoload/audio.gd"
 DebugOverlay="*res://scenes/ui/debug_overlay.tscn"
 TuningPanel="*res://scenes/ui/tuning_panel.tscn"
 
@@ -131,6 +132,17 @@ quick_turn={
 , Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":2,"pressure":0.0,"pressed":false,"script":null)
 ]
 }
+[shader_globals]
+
+route_strength={
+"type": "float",
+"value": 1.0
+}
+night={
+"type": "float",
+"value": 0.0
+}
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

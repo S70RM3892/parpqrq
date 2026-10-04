@@ -68,6 +68,8 @@ var retry_hold: float = -1.0
 var input_enabled: bool = true
 ## 今立っている床の素材（足音が読む）。&"concrete" / &"metal" / &"glass" / &"gravel"
 var floor_surface: StringName = &"concrete"
+## 今ジャンプすると出る技（照準点が広がる：仕様書 8章）。&"" = 普通のジャンプ
+var move_hint: StringName = &""
 
 var _since_floor: float = 0.0
 var _since_jump_press: float = INF
@@ -158,6 +160,8 @@ func _physics_process(delta: float) -> void:
 	_update_stride(delta)
 	_update_momentum(delta)
 	_continuous_haptics()
+	if Engine.get_physics_frames() % 3 == 0:
+		_update_move_hint()
 
 
 func horizontal_speed() -> float:
@@ -534,12 +538,18 @@ func _start_hard_land(drop: float) -> void:
 		_set_state(State.HARD_LAND)
 
 
-func _try_vault() -> bool:
+## 今ジャンプしたらヴォルトになる障害物（無ければ null）
+func _find_vault() -> VaultProbe.Result:
 	var spd := horizontal_speed()
 	if spd < params.vault_min_speed:
-		return false
+		return null
 	var dir := Vector3(velocity.x, 0.0, velocity.z).normalized()
-	var r := VaultProbe.probe(self, dir, spd, params, _capsule.radius, STAND_HEIGHT)
+	return VaultProbe.probe(self, dir, spd, params, _capsule.radius, STAND_HEIGHT)
+
+
+func _try_vault() -> bool:
+	var spd := horizontal_speed()
+	var r := _find_vault()
 	if r == null:
 		return false
 	# 体が障害物に着く vault_ideal_time 前に押していればPerfect（先行入力で遅れて発動した分も押した時刻で測る）
@@ -561,10 +571,14 @@ func _try_vault() -> bool:
 
 
 ## 地上から：向いている方向に手の届く縁があれば登る
-func _try_climb() -> bool:
+func _find_climb() -> VaultProbe.Result:
 	var reach := maxf(0.7, horizontal_speed() * params.vault_reach_time)
-	var r := VaultProbe.ledge(self, _facing(), reach, params.vault_min_height, params.climb_max_height,
+	return VaultProbe.ledge(self, _facing(), reach, params.vault_min_height, params.climb_max_height,
 			params.vault_auto_align_deg, _capsule.radius, STAND_HEIGHT)
+
+
+func _try_climb() -> bool:
+	var r := _find_climb()
 	if r == null:
 		return false
 	_start_climb(r)
@@ -591,25 +605,39 @@ func _start_climb(r: VaultProbe.Result) -> void:
 
 
 ## 縦のウォールラン：壁に正対してジャンプ
-func _try_wall_climb() -> bool:
+## 今ジャンプしたら縦ウォールランになる壁（無ければ空）
+func _find_wall_climb() -> Dictionary:
 	if horizontal_speed() < params.wallrun_up_min_speed:
-		return false
+		return {}
 	var dir := _facing()
 	# 速いほど遠くから届く（ヴォルトと同じ考え方）
 	var reach := _capsule.radius + maxf(0.7, horizontal_speed() * params.vault_reach_time)
 	var hit := VaultProbe.front_wall(self, dir, reach)
+	if hit.is_empty() or not _can_wall_climb(hit, dir):
+		return {}
+	return hit
+
+
+func _try_wall_climb() -> bool:
+	var hit := _find_wall_climb()
 	if hit.is_empty():
 		return false
-	return _start_wall_climb(hit, dir)
+	return _start_wall_climb(hit, _facing())
 
 
-func _start_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
+func _can_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
 	var n: Vector3 = hit.normal
 	n = Vector3(n.x, 0.0, n.z).normalized()
 	if rad_to_deg((-n).angle_to(dir)) > params.vault_auto_align_deg:
 		return false
-	if _wall_cooldown > 0.0 and n.dot(_last_wall_normal) > 0.9:
+	return not (_wall_cooldown > 0.0 and n.dot(_last_wall_normal) > 0.9)
+
+
+func _start_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
+	if not _can_wall_climb(hit, dir):
 		return false
+	var n: Vector3 = hit.normal
+	n = Vector3(n.x, 0.0, n.z).normalized()
 	wall_normal = n
 	_wall_climb_speed_in = horizontal_speed()
 	# 壁まで少し距離があれば、その分は今の速度で寄っていく（_wall_climb が壁へ押し付ける）
@@ -924,6 +952,25 @@ func _apply_perfect(kind: StringName, boost: bool) -> void:
 		var h := _boost(Vector3(velocity.x, 0.0, velocity.z), params.perfect_speed_bonus)
 		velocity = Vector3(h.x, velocity.y, h.z)
 	perfect.emit(kind)
+
+
+## 照準点のための先読み（3フレームに1回。地形を調べるだけで何も起こさない）
+func _update_move_hint() -> void:
+	move_hint = &""
+	match state:
+		State.GROUND, State.ROLL:
+			if _find_vault() != null:
+				move_hint = &"vault"
+			elif _find_climb() != null:
+				move_hint = &"climb"
+			elif not _find_wall_climb().is_empty():
+				move_hint = &"wall_climb"
+		State.AIR:
+			var h := Vector3(velocity.x, 0.0, velocity.z)
+			if h.length() >= params.wallrun_min_speed and not VaultProbe.side_wall(self, h.normalized(), _capsule.radius + 1.2).is_empty():
+				move_hint = &"wall_run"
+		State.WALL_RUN, State.LEDGE_HANG, State.WALL_CLIMB:
+			move_hint = &"jump"
 
 
 ## 止まっている間だけ勢い値が減る（普通に走っている間は減らない：仕様書 5章）
