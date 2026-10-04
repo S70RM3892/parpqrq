@@ -71,6 +71,28 @@ extends Resource
 @export_range(0.0, 1.5, 0.05) var hard_land_stun: float = 0.0   ## s。0.3.0-beta の試走で「止まるのが不快」となり0（仕様書は0.6）
 @export_range(0.0, 1.0, 0.05) var hard_land_speed_loss: float = 0.0 ## 同上で0（仕様書は0.7）。揺れと振動だけ残す
 
+@export_group("慣性の制御")
+@export_range(10.0, 120.0, 1.0) var brake_decel: float = 45.0    ## m/s²。進行方向と逆に倒した時の地上の減速
+@export_range(0.0, 1.0, 0.05) var air_brake: float = 0.45       ## 空中で逆に倒した時の減速（地上ブレーキ比）
+@export_range(0.0, 1.0, 0.05) var quick_turn_keep: float = 0.5  ## クイックターンで逆向きに残す速度の割合
+@export_range(0.05, 0.5, 0.01) var quick_turn_time: float = 0.18 ## s。180°振り向く時間
+
+@export_group("フロー（勢い値・Perfect）")
+@export_range(0.0, 0.3, 0.01) var roll_speed_bonus: float = 0.10     ## ローリング成功の上乗せ
+@export_range(0.01, 0.15, 0.005) var perfect_window: float = 0.05    ## s。理想タイミングからのずれ（仕様書 ±50 ms）
+@export_range(0.05, 0.4, 0.01) var perfect_chain_window: float = 0.15 ## s。張り付いて/滑り出してからこの時間内に跳ぶとPerfect
+@export_range(0.0, 0.15, 0.005) var perfect_speed_bonus: float = 0.03 ## 仕様書 +3%
+@export_range(0.05, 0.4, 0.01) var vault_ideal_time: float = 0.15    ## s。体が障害物に着くこの時間前にジャンプするとPerfect
+@export_range(0.0, 0.1, 0.005) var perfect_slowmo_time: float = 0.04  ## s（実時間）
+@export_range(0.05, 1.0, 0.05) var perfect_slowmo_scale: float = 0.2
+@export_range(1.0, 1.5, 0.01) var flow_cap_base: float = 1.15        ## 勢い0の時の上限 = 走り速度 × これ。勢い100%で max_flow_speed
+@export_range(0.0, 0.5, 0.01) var momentum_gain_move: float = 0.10   ## ヴォルト・ウォールラン・壁ジャンプ・ローリング1回で溜まる量
+@export_range(0.0, 0.5, 0.01) var momentum_gain_small: float = 0.05  ## クライム・スライド
+@export_range(0.0, 0.5, 0.01) var momentum_gain_perfect: float = 0.10
+@export_range(0.0, 3.0, 0.05) var momentum_stop_decay: float = 0.5   ## /s。歩き速度より遅い間に減る量
+@export_range(0.0, 1.0, 0.05) var momentum_crash_loss: float = 0.6   ## 壁に激突した時に失う割合
+@export_range(0.0, 1.0, 0.05) var momentum_hard_land_loss: float = 0.25
+
 @export_group("足取り")
 @export_range(0.5, 4.0, 0.1) var cadence_walk: float = 2.0      ## 歩/s
 @export_range(1.5, 5.0, 0.1) var cadence_run: float = 3.3       ## 歩/s

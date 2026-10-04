@@ -26,6 +26,8 @@ const HARD_LAND_EYE_DROP := 0.35    ## m
 const SLIDE_EYE_DROP := 0.9         ## m
 const SLIDE_PITCH_DEG := 5.0        ## 後傾
 const WALLRUN_ROLL_DEG := 10.0      ## 壁と反対側へ
+const BRAKE_EYE_DROP := 0.12        ## m
+const BRAKE_PITCH_DEG := 4.0        ## のけぞり
 const SHAKE_DECAY := 1.5            ## トラウマ/秒
 const SHAKE_ROT_DEG := Vector3(2.0, 2.0, 3.0)
 const SHAKE_POS := 0.03
@@ -58,6 +60,8 @@ var _step_offset: float = 0.0
 var _trauma: float = 0.0
 var _time: float = 0.0
 var _speed_fov: float = 0.0
+var _turn_left: float = 0.0
+var _turn_speed: float = 0.0
 var _noise := FastNoiseLite.new()
 
 @onready var _pitch: Node3D = $Pitch
@@ -104,6 +108,11 @@ func _process(delta: float) -> void:
 		stick *= stick.length()
 		var step := STICK_DEG_PER_SEC * delta
 		_add_look(-stick.x * step * Settings.sensitivity_x, -stick.y * step * Settings.sensitivity_y * _invert())
+	if _turn_left != 0.0:
+		var turn := signf(_turn_left) * minf(absf(_turn_left), _turn_speed * delta)
+		_turn_left -= turn
+		yaw = wrapf(yaw + turn, -PI, PI)
+		_apply_rotation()
 	_step_offset *= exp(-delta / STEP_SMOOTH_TIME)
 	if eye != null:
 		global_position = eye.get_global_transform_interpolated().origin + Vector3.UP * _step_offset
@@ -118,10 +127,22 @@ func snap(new_yaw: float, new_pitch: float = 0.0) -> void:
 	pitch = new_pitch
 	_apply_rotation()
 	_step_offset = 0.0
+	_turn_left = 0.0
 	_dip_t = INF
 	_trauma = 0.0
 	if eye != null:
 		global_position = eye.global_position
+
+
+## クイックターン：angle（ラジアン）を time 秒で回す
+func start_turn(angle: float, time: float) -> void:
+	_turn_left += angle
+	_turn_speed = absf(_turn_left) / maxf(time, 0.01)
+
+
+## 移動の向き。クイックターン中は回りきった後の向きを使う（入力の向きが途中でぶれないように）
+func move_yaw() -> float:
+	return yaw + _turn_left
 
 
 ## 段差を乗り越えた時の目線の跳ねを吸収する（dy だけ下げてから素早く戻す）
@@ -204,6 +225,11 @@ func _update_camera_layer(delta: float) -> void:
 		Player.State.SLIDE:
 			drop_target = SLIDE_EYE_DROP
 			pitch_target = SLIDE_PITCH_DEG
+		Player.State.GROUND:
+			if p.braking:
+				# 足を前に突っ張って止まる：少し沈んでのけぞる
+				drop_target = BRAKE_EYE_DROP
+				pitch_target = BRAKE_PITCH_DEG
 	var roll_target := 0.0
 	if p.state == Player.State.WALL_RUN:
 		# 右の壁なら左へ傾ける（rotation.z が + で視界は左に傾く）

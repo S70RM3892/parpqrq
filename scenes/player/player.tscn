@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
 [ext_resource type="Resource" path="res://resources/movement_default.tres" id="2_params"]
@@ -11,6 +11,13 @@
 [ext_resource type="ArrayMesh" path="res://assets/body/leg_shin.res" id="9_shin"]
 [ext_resource type="ArrayMesh" path="res://assets/body/leg_foot.res" id="10_foot"]
 [ext_resource type="Material" path="res://assets/body/leg_material.tres" id="11_legmat"]
+[ext_resource type="Script" path="res://scripts/ui/flow_hud.gd" id="12_flow"]
+[ext_resource type="Shader" path="res://shaders/flow_edge.gdshader" id="13_edge"]
+
+[sub_resource type="ShaderMaterial" id="Mat_edge"]
+shader = ExtResource("13_edge")
+shader_parameter/glow_color = Color(1, 0.416, 0.102, 1)
+shader_parameter/intensity = 0.0
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.35
@@ -107,3 +114,35 @@ surface_material_override/0 = ExtResource("11_legmat")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4507, 0.0553)
 mesh = ExtResource("10_foot")
 surface_material_override/0 = ExtResource("11_legmat")
+
+[node name="FlowHUD" type="CanvasLayer" parent="." node_paths=PackedStringArray("player")]
+script = ExtResource("12_flow")
+player = NodePath("..")
+
+[node name="Edge" type="ColorRect" parent="FlowHUD"]
+material = SubResource("Mat_edge")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Perfect" type="Label" parent="FlowHUD"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -260.0
+offset_right = 200.0
+offset_bottom = -200.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(1, 0.416, 0.102, 1)
+theme_override_constants/outline_size = 10
+theme_override_font_sizes/font_size = 40
+text = "PERFECT"
+horizontal_alignment = 1

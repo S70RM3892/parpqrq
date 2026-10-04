@@ -20,6 +20,9 @@ func _run() -> void:
 	if p == null:
 		return
 	var mp := p.params
+	Settings.hitstop_slowmo = false  # スローが入るとフレーム数で測る時間がずれる
+	var timer := get_tree().root.find_child("CourseTimer", true, false) as CourseTimer
+	timer.use_records("smoke_test", true)
 	await _frames(30)
 	_check_true("on floor at spawn", p.is_on_floor())
 
@@ -64,6 +67,11 @@ func _run() -> void:
 	_check_near("retry returns to spawn", p.global_position.distance_to(Vector3(0, 0, 8)), 0.0, 0.05)
 
 	await _course_run(p)
+	_check_true("ghost saved from the best run (%d samples)" % timer.ghost_samples(), timer.ghost_samples() > 300)
+	_check_true("result has a medal: %s" % str(timer.last_result), timer.last_result.get("medal", "") != "")
+	await _perfect_tests(p)
+	await _inertia_tests(p)
+	await _momentum_test(p)
 	await _stairs_test(p)
 	await _crash_test(p)
 	await _wall_jump_test(p)
@@ -202,7 +210,11 @@ func _course_run(p: Player) -> void:
 	var r := {
 		"vaults": 0, "onto_y": -1.0, "vault_speeds": [], "rolled": false, "roll_end_speed": -1.0,
 		"crash": 0, "min_y": 0.0, "max_y": 0.0, "top_after_wall_climb": 0.0, "hard": 0, "hard_speed": -1.0, "hard_frame": -1,
+		"vault_in": 0.0, "roll_gain": 0.0, "perfects": 0,
 	}
+	var on_perfect := func(_k: StringName) -> void: r.perfects += 1
+	p.perfect.connect(on_perfect)
+	var last_air_speed := 0.0
 	var on_hard := func(_d: float) -> void:
 		r.hard += 1
 		r.hard_frame = Engine.get_physics_frames()
@@ -240,12 +252,16 @@ func _course_run(p: Player) -> void:
 
 		# 状態が変わった瞬間の記録
 		if p.state != prev_state:
+			if p.state == Player.State.VAULT:
+				r.vault_in = p._move_speed_in
 			if prev_state == Player.State.VAULT:
 				r.vaults += 1
 				if was_onto:
 					r.onto_y = pos.y
 				else:
-					(r.vault_speeds as Array).append(spd)
+					(r.vault_speeds as Array).append(spd / r.vault_in)
+			if p.state == Player.State.ROLL and r.roll_gain == 0.0 and last_air_speed > 0.0:
+				r.roll_gain = spd / last_air_speed
 			if prev_state == Player.State.ROLL and r.roll_end_speed < 0.0:
 				r.roll_end_speed = spd
 			if p.state == Player.State.AIR:
@@ -258,6 +274,7 @@ func _course_run(p: Player) -> void:
 			r.rolled = true
 		if p.state == Player.State.AIR:
 			peak_y = maxf(peak_y, pos.y)
+			last_air_speed = spd
 
 		var on_feet := p.state == Player.State.GROUND or p.state == Player.State.ROLL
 		if on_feet and cooldown <= 0.0:
@@ -288,15 +305,16 @@ func _course_run(p: Player) -> void:
 	Input.action_release(&"jump")
 	p.crashed.disconnect(on_crash)
 	p.hard_landed.disconnect(on_hard)
+	p.perfect.disconnect(on_perfect)
+	print("  course run: perfects %d, momentum at goal %.2f, result %s" % [r.perfects, p.momentum, str(timer_result())])
 
-	var keep := mp.run_speed * mp.vault_speed_keep
 	_check_true("vaults done: %d (want 4: 1.0 m, 0.8 m, onto box, 1.2 m)" % r.vaults, r.vaults >= 4)
-	for spd: float in r.vault_speeds:
-		_check_near("vault keeps 95%% speed", spd, keep, keep * 0.06)
+	for ratio: float in r.vault_speeds:
+		_check_true("vault keeps >= 95%% speed (x%.3f)" % ratio, ratio > mp.vault_speed_keep - 0.01)
 	_check_near("vault onto: standing on box top", r.onto_y, 1.0, 0.05)
 	_check_true("stairs climbed to the 4.8 m tower (max y %.2f)" % r.max_y, r.max_y > 4.75)
 	_check_true("rolled after a big drop", r.rolled)
-	_check_near("roll keeps speed", r.roll_end_speed, mp.run_speed, mp.run_speed * 0.08)
+	_check_true("roll adds speed (x%.3f)" % r.roll_gain, r.roll_gain > 1.0 + mp.roll_speed_bonus - 0.02)
 	_check_true("hard landing feedback after 4.8 m drop without roll (%d)" % r.hard, r.hard >= 1)
 	_check_near("hard landing does not stop the run (speed after)", r.hard_speed, mp.run_speed * (1.0 - mp.hard_land_speed_loss), 0.5)
 	_check_true("slide under the bar", seen.has(Player.State.SLIDE))
@@ -307,6 +325,160 @@ func _course_run(p: Player) -> void:
 	_check_true("on top of the 4 m wall after vertical wall run (max y %.2f)" % r.top_after_wall_climb, r.top_after_wall_climb > 3.95)
 	_check_true("no wall crash on the clean line (got %d)" % r.crash, r.crash == 0)
 	_check_true("reached goal, timer shown: %s" % (label.text.replace("\n", " ") if label != null else "-"), label != null and label.text != "")
+
+
+func timer_result() -> Dictionary:
+	var t := get_tree().root.find_child("CourseTimer", true, false) as CourseTimer
+	return t.last_result if t != null else {}
+
+
+## 平らな場所（x=-19）で走り出し、走り速度に乗せる
+func _run_up(p: Player, z: float = 8.0) -> void:
+	await _place(p, Vector3(-19.0, 0.0, z), Vector3.ZERO)
+	await _frames(3)
+	Input.action_press(&"move_forward")
+	await _seconds(0.5)
+
+
+## 着地Perfectジャンプ・Perfectローリング・ずれたローリング・Perfectヴォルト
+func _perfect_tests(p: Player) -> void:
+	var mp := p.params
+	var got := {"kinds": []}
+	var on_perfect := func(k: StringName) -> void: (got.kinds as Array).append(k)
+	p.perfect.connect(on_perfect)
+
+	# 着地の瞬間にジャンプ → 速度+3%
+	await _run_up(p)
+	Input.action_press(&"jump")
+	await _frames(12)
+	Input.action_release(&"jump")
+	while p.state != Player.State.GROUND:
+		await get_tree().physics_frame
+	var v_land := p.horizontal_speed()
+	Input.action_press(&"jump")
+	await _frames(2)
+	_check_true("perfect landing jump fired", (got.kinds as Array).has(&"landing_jump"))
+	_check_near("perfect landing jump: speed +3%", p.horizontal_speed(), v_land * (1.0 + mp.perfect_speed_bonus), 0.08)
+	Input.action_release(&"jump")
+	Input.action_release(&"move_forward")
+
+	# 3 m から落ちて、着地のフレームでしゃがむ → Perfectローリング（+10% と +3%）
+	got.kinds = []
+	await _place(p, Vector3(-19.0, 3.0, 8.0), Vector3(0, 0, -8.0))
+	Input.action_press(&"move_forward")  # 実際のプレイと同じく前を押したまま（離すと地上で減速が入る）
+	while p.state != Player.State.GROUND:
+		await get_tree().physics_frame
+	var v0 := p.horizontal_speed()
+	Input.action_press(&"crouch")
+	await _frames(2)
+	Input.action_release(&"crouch")
+	Input.action_release(&"move_forward")
+	_check_true("perfect roll: rolled", p.state == Player.State.ROLL)
+	_check_true("perfect roll fired", (got.kinds as Array).has(&"roll"))
+	_check_near("perfect roll: speed x1.10 x1.03", p.horizontal_speed(), v0 * (1.0 + mp.roll_speed_bonus) * (1.0 + mp.perfect_speed_bonus), 0.15)
+
+	# 着地の0.15秒前にしゃがむ → ローリングは成功（+10%）、Perfectではない
+	got.kinds = []
+	await _place(p, Vector3(-19.0, 3.0, 8.0), Vector3(0, 0, -8.0))
+	while p.velocity.y > -0.1 or p.global_position.y > absf(p.velocity.y) * 0.15 + 0.02:
+		await get_tree().physics_frame
+	Input.action_press(&"crouch")
+	await get_tree().physics_frame
+	Input.action_release(&"crouch")
+	while p.state == Player.State.AIR:
+		await get_tree().physics_frame
+	_check_true("early roll: rolled", p.state == Player.State.ROLL)
+	_check_true("early roll: not perfect", not (got.kinds as Array).has(&"roll"))
+	_check_near("early roll: speed x1.10", p.horizontal_speed(), 8.0 * (1.0 + mp.roll_speed_bonus), 0.1)
+
+	# ヴォルト：体が壁に着く0.15秒前に押す → Perfect、越えた後の速度は100%+3%
+	got.kinds = []
+	await _place(p, Vector3(0.0, 0.0, 9.0), Vector3.ZERO)
+	await _frames(3)
+	Input.action_press(&"move_forward")
+	await _seconds(0.5)
+	while p.global_position.z - 0.25 - 0.35 > p.horizontal_speed() * mp.vault_ideal_time:
+		await get_tree().physics_frame
+	var v_in := p.horizontal_speed()
+	Input.action_press(&"jump")
+	await get_tree().physics_frame
+	Input.action_release(&"jump")
+	while p.state != Player.State.VAULT:
+		await get_tree().physics_frame
+	while p.state == Player.State.VAULT:
+		await get_tree().physics_frame
+	_check_true("perfect vault fired", (got.kinds as Array).has(&"vault"))
+	_check_near("perfect vault: exit speed +3%", p.horizontal_speed(), v_in * (1.0 + mp.perfect_speed_bonus), 0.15)
+	Input.action_release(&"move_forward")
+	p.perfect.disconnect(on_perfect)
+
+
+## 慣性の制御：地上ブレーキ、空中は入力なしで勢いを保つ、空中ブレーキ、クイックターン
+func _inertia_tests(p: Player) -> void:
+	var mp := p.params
+	# 地上：逆に倒すと急停止
+	await _run_up(p)
+	var v0 := p.horizontal_speed()
+	Input.action_release(&"move_forward")
+	Input.action_press(&"move_back")
+	var braked := false
+	var t := 0.0
+	while p.horizontal_speed() > 0.5 and t < 1.0:
+		await get_tree().physics_frame
+		t += 1.0 / 60.0
+		braked = braked or p.braking
+	Input.action_release(&"move_back")
+	_check_true("brake: braking flag on", braked)
+	_check_true("brake: %.1f m/s stopped in %.2f s" % [v0, t], t <= v0 / mp.brake_decel + 0.05)
+
+	# 空中：何も倒さなければ勢いを保つ
+	await _run_up(p)
+	Input.action_press(&"jump")
+	await _frames(2)  # スクリプトからの入力は1フレーム遅れて反映される
+	Input.action_release(&"move_forward")
+	var v_air := p.horizontal_speed()
+	await _seconds(0.4)
+	Input.action_release(&"jump")
+	_check_near("air: no input keeps momentum", p.horizontal_speed(), v_air, 0.05)
+
+	# 空中：逆に倒すとブレーキ
+	await _run_up(p)
+	Input.action_press(&"jump")
+	await _frames(2)
+	Input.action_release(&"move_forward")
+	v_air = p.horizontal_speed()
+	Input.action_press(&"move_back")
+	await _seconds(0.3)
+	Input.action_release(&"move_back")
+	Input.action_release(&"jump")
+	var want := v_air - mp.brake_decel * mp.air_brake * 0.3
+	_check_true("air brake: %.2f -> %.2f m/s (want <= %.2f)" % [v_air, p.horizontal_speed(), want + 0.3], p.horizontal_speed() <= want + 0.3)
+
+	# クイックターン：振り向いて、速度の半分で反対へ
+	await _run_up(p)
+	var yaw0 := p.rig.yaw
+	v0 = p.horizontal_speed()
+	Input.action_press(&"quick_turn")
+	await _frames(2)
+	Input.action_release(&"quick_turn")
+	_check_true("quick turn: moving backwards now (vz %.2f)" % p.velocity.z, p.velocity.z > v0 * mp.quick_turn_keep * 0.9)
+	await _seconds(mp.quick_turn_time + 0.05)
+	_check_near("quick turn: view turned 180 deg", absf(wrapf(p.rig.yaw - yaw0, -PI, PI)), PI, 0.05)
+	Input.action_release(&"move_forward")
+
+
+## 勢い値：止まっていると減る、走っている間は減らない
+func _momentum_test(p: Player) -> void:
+	await _place(p, Vector3(-19.0, 0.0, 8.0), Vector3.ZERO)
+	await _frames(3)
+	Input.action_press(&"move_forward")
+	await _seconds(0.5)  # 歩き速度より遅い加速中は減るので、走り速度に乗ってから測る
+	p.momentum = 0.5
+	await _seconds(1.0)
+	_check_near("momentum: does not drop while running", p.momentum, 0.5, 0.01)
+	Input.action_release(&"move_forward")
+	await _seconds(1.5)
+	_check_true("momentum: drops while stopped (%.2f)" % p.momentum, p.momentum <= maxf(0.5 - p.params.momentum_stop_decay * 1.2, 0.0) + 0.01)
 
 
 func _ray(p: Player, from: Vector3, motion: Vector3) -> Dictionary:

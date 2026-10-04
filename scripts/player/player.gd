@@ -4,6 +4,11 @@ extends CharacterBody3D
 ## 走り・ジャンプ・ヴォルト・クライム・レッジグラブ・ウォールラン（横/縦）・壁ジャンプ・スライド・ローリング・ハードランディング。
 ## 速度計算は全部自前で行い、move_and_slide() は衝突処理だけに使う。
 ## 演出（カメラ・体・振動）はここでは行わず、シグナルと公開している状態を各層が読む。
+##
+## 上手いほど速くなる仕組み（仕様書 5章）:
+## - Perfect判定：理想タイミング±perfect_window で技を出すと速度+3%、勢い値が溜まる
+## - 勢い値（momentum 0〜1）：技を繋ぐと溜まり、溜まるほど速度の上限（flow_cap）が上がる。止まる・激突で減る
+## 慣性の制御：進行方向と逆に倒すとブレーキ。空中で何も倒さなければ勢いを保つ。クイックターンで180°振り向く
 
 signal jumped
 signal footstep
@@ -19,6 +24,9 @@ signal wall_jumped
 signal slide_started
 ## 壁に正面からぶつかった。speed = 壁に向かっていた速度 m/s
 signal crashed(speed: float)
+## Perfect判定。kind = &"landing_jump" / &"roll" / &"vault" / &"wall_jump" / &"slide_jump"
+signal perfect(kind: StringName)
+signal quick_turned
 
 enum State { GROUND, AIR, VAULT, ROLL, HARD_LAND, CLIMB, LEDGE_HANG, WALL_RUN, WALL_CLIMB, SLIDE }
 
@@ -44,6 +52,11 @@ var wall_normal: Vector3 = Vector3.ZERO
 var wall_side: float = 0.0
 var spawn: Transform3D
 var checkpoint: Transform3D
+## 勢い値 0〜1
+var momentum: float = 0.0
+var perfect_count: int = 0
+## 進行方向と逆に倒して減速中（カメラ・脚・振動が読む）
+var braking: bool = false
 
 var _since_floor: float = 0.0
 var _since_jump_press: float = INF
@@ -60,6 +73,11 @@ var _move_speed_in: float = 0.0
 var _last_wall_normal: Vector3 = Vector3.ZERO
 var _wall_cooldown: float = 0.0
 var _climb_rise_d: float = 0.0
+## Perfect判定用の時刻（秒）
+var _clock: float = 0.0
+var _land_clock: float = -INF
+var _jump_press_clock: float = -INF
+var _vault_perfect: bool = false
 
 @onready var rig: CameraRig = $CameraRig
 @onready var _shape_node: CollisionShape3D = $CollisionShape3D
@@ -93,10 +111,16 @@ func _physics_process(delta: float) -> void:
 	if global_position.y < -30.0:
 		respawn(checkpoint)
 		return
+	_clock += delta
+	if Input.is_action_just_pressed(&"jump"):
+		_jump_press_clock = _clock
 	_since_jump_press = 0.0 if Input.is_action_just_pressed(&"jump") else _since_jump_press + delta
 	_since_crouch_press = 0.0 if Input.is_action_just_pressed(&"crouch") else _since_crouch_press + delta
 	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
 	state_time += delta
+	braking = false
+	if Input.is_action_just_pressed(&"quick_turn"):
+		_quick_turn()
 
 	match state:
 		State.GROUND:
@@ -120,11 +144,17 @@ func _physics_process(delta: float) -> void:
 		State.SLIDE:
 			_slide(delta)
 	_update_stride(delta)
+	_update_momentum(delta)
 	_continuous_haptics()
 
 
 func horizontal_speed() -> float:
 	return Vector2(velocity.x, velocity.z).length()
+
+
+## 今の速度の上限。勢い0で 走り速度×flow_cap_base、勢い100%で max_flow_speed
+func flow_cap() -> float:
+	return lerpf(params.run_speed * params.flow_cap_base, params.max_flow_speed, momentum)
 
 
 ## 物理tick間を補間した足取り位相（描画側が使う）
@@ -138,6 +168,10 @@ func respawn(at: Transform3D = spawn) -> void:
 	velocity = Vector3.ZERO
 	_pending_time = -1.0
 	move = null
+	momentum = 0.0
+	perfect_count = 0
+	braking = false
+	_land_clock = -INF
 	_set_height(STAND_HEIGHT)
 	_set_state(State.AIR)
 	reset_physics_interpolation()
@@ -153,7 +187,7 @@ func _ground(delta: float) -> void:
 	if _pending_time >= 0.0:
 		_pending_time += delta
 		if _since_crouch_press <= _pending_time:
-			_start_roll(_pending_drop)
+			_start_roll(_pending_drop, _pending_time - _since_crouch_press)  # 着地からどれだけ遅れて押したか
 			return
 		if _pending_time > params.roll_window_after:
 			_pending_time = -1.0
@@ -162,7 +196,13 @@ func _ground(delta: float) -> void:
 				return
 	elif _since_jump_press <= params.jump_buffer:
 		if not _try_ground_move():
+			# 着地の瞬間（±perfect_window）に押したジャンプはPerfect：速度を落とさず上乗せして跳ぶ
+			var hop := _clock - _land_clock <= params.perfect_window + 0.001 \
+					and absf(_jump_press_clock - _land_clock) <= params.perfect_window \
+					and horizontal_speed() > params.walk_speed
 			_jump()
+			if hop:
+				_apply_perfect(&"landing_jump", true)
 			_move(delta, false)  # 押したフレームで上昇を始める
 		return
 	elif _since_crouch_press <= params.move_buffer and _try_slide():
@@ -209,8 +249,9 @@ func _vault(delta: float) -> void:
 	pos.y = _vault_height(v, d)
 	_teleport(pos, delta)
 	if move_progress >= 1.0:
-		var out := v.dir * maxf(_move_speed_in, params.walk_speed) * params.vault_speed_keep
-		_finish_move(v, out)
+		var keep := 1.0 + params.perfect_speed_bonus if _vault_perfect else params.vault_speed_keep
+		var out := v.dir * maxf(_move_speed_in, params.walk_speed) * keep
+		_finish_move(v, out.limit_length(maxf(flow_cap(), _move_speed_in)))
 
 
 ## よじ登り：まず壁際で縁の上まで体を上げ（前半55%）、それから上面へ進む
@@ -320,18 +361,26 @@ func _slide(delta: float) -> void:
 	h += slope_acc * delta
 	if not accelerating:
 		h = h.move_toward(Vector3.ZERO, params.slide_friction * delta)
-	# 向きは少しだけ変えられる
+	# 向きは少しだけ変えられる。逆に倒すとブレーキ
 	var want := _desired_velocity()
-	if want != Vector3.ZERO and h.length() > 0.1:
+	braking = want != Vector3.ZERO and h.length() > 0.5 and want.dot(h) < 0.0
+	if braking:
+		h = h.move_toward(Vector3.ZERO, params.brake_decel * 0.6 * delta)
+	elif want != Vector3.ZERO and h.length() > 0.1:
 		h = h.slerp(want.normalized() * h.length(), minf(1.0, 1.5 * delta))
 	h = h.limit_length(params.max_flow_speed)
 	velocity = Vector3(h.x, minf(velocity.y, 0.0), h.z)
 
 	if _since_jump_press <= params.jump_buffer and VaultProbe.can_stand(self, _capsule.radius, STAND_HEIGHT):
-		var boosted := h * (1.0 + params.slide_jump_bonus)
-		velocity = Vector3(boosted.x, 0.0, boosted.z).limit_length(params.max_flow_speed)
+		# 滑り出してすぐ跳ぶとPerfect
+		var quick := state_time <= params.perfect_chain_window
+		var bonus := params.slide_jump_bonus + (params.perfect_speed_bonus if quick else 0.0)
+		var boosted := _boost(h, bonus)
+		velocity = Vector3(boosted.x, 0.0, boosted.z)
 		_set_height(STAND_HEIGHT)
 		_jump()
+		if quick:
+			_apply_perfect(&"slide_jump", false)
 		_move(delta, false)
 		return
 	_move(delta, true)
@@ -414,9 +463,10 @@ func _land() -> void:
 	_since_floor = 0.0
 	velocity.y = 0.0
 	landed.emit(impact, drop)
+	_land_clock = _clock
 	if drop >= params.roll_min_drop:
 		if _since_crouch_press <= params.roll_window_before:
-			_start_roll(drop)
+			_start_roll(drop, _since_crouch_press)  # 着地のどれだけ前に押したか
 		else:
 			_pending_drop = drop
 			_pending_time = 0.0
@@ -424,16 +474,23 @@ func _land() -> void:
 		_try_slide()  # 着地にしゃがみを合わせると、そのままスライドへ
 
 
-func _start_roll(drop: float) -> void:
+## timing_error = 着地としゃがみ入力のずれ（秒）。成功で速度を上乗せ、ずれが perfect_window 以内ならさらに上乗せ
+func _start_roll(drop: float, timing_error: float) -> void:
 	_pending_time = -1.0
 	_since_crouch_press = INF
+	_add_momentum(params.momentum_gain_move)
+	var h := _boost(Vector3(velocity.x, 0.0, velocity.z), params.roll_speed_bonus)
+	velocity = Vector3(h.x, velocity.y, h.z)
 	_set_state(State.ROLL)
 	rolled.emit(drop)
+	if timing_error <= params.perfect_window:
+		_apply_perfect(&"roll", true)
 
 
 func _start_hard_land(drop: float) -> void:
 	var h := Vector3(velocity.x, 0.0, velocity.z) * (1.0 - params.hard_land_speed_loss)
 	velocity = Vector3(h.x, 0.0, h.z)
+	momentum = maxf(momentum - params.momentum_hard_land_loss, 0.0)
 	hard_landed.emit(drop)  # 揺れ・振動は常に出す
 	if params.hard_land_stun > 0.0:
 		_set_state(State.HARD_LAND)
@@ -447,6 +504,9 @@ func _try_vault() -> bool:
 	var r := VaultProbe.probe(self, dir, spd, params, _capsule.radius, STAND_HEIGHT)
 	if r == null:
 		return false
+	# 体が障害物に着く vault_ideal_time 前に押していればPerfect（先行入力で遅れて発動した分も押した時刻で測る）
+	var time_to_face := (r.front_dist - _capsule.radius) / spd + _since_jump_press
+	_vault_perfect = absf(time_to_face - params.vault_ideal_time) <= params.perfect_window
 	move = r
 	move_progress = 0.0
 	_move_speed_in = spd
@@ -454,8 +514,11 @@ func _try_vault() -> bool:
 			params.vault_min_duration, params.vault_max_duration)
 	_since_jump_press = INF
 	_pending_time = -1.0
+	_add_momentum(params.momentum_gain_move)
 	_set_state(State.VAULT)
 	vault_started.emit()
+	if _vault_perfect:
+		_apply_perfect(&"vault", false)  # 速度は越えた時に上乗せする
 	return true
 
 
@@ -483,6 +546,7 @@ func _start_climb(r: VaultProbe.Result) -> void:
 	move.back_dist = front_dist + _capsule.radius + 0.3
 	_since_jump_press = INF
 	_pending_time = -1.0
+	_add_momentum(params.momentum_gain_small)
 	_set_state(State.CLIMB)
 	climb_started.emit()
 
@@ -584,15 +648,22 @@ func _try_wall_run() -> bool:
 	var keep := along * h.length()
 	# 跳んだ勢いを残しつつ、上向きを lift〜max_lift に収める（落ちながら張り付いても少し持ち上げる）
 	velocity = Vector3(keep.x, clampf(velocity.y, params.wallrun_entry_lift, params.wallrun_entry_max_lift), keep.z)
+	_add_momentum(params.momentum_gain_move)
 	_set_state(State.WALL_RUN)
 	wallrun_started.emit()
 	return true
 
 
 func _wall_jump(along: Vector3, spd: float) -> void:
+	# 張り付いてすぐ蹴るとPerfect
+	var quick := state_time <= params.perfect_chain_window
+	var bonus := params.wall_jump_speed_bonus + (params.perfect_speed_bonus if quick else 0.0)
+	_add_momentum(params.momentum_gain_move)
 	var dir := (along + wall_normal * params.wall_jump_push).normalized()
-	var out := dir * minf(spd * (1.0 + params.wall_jump_speed_bonus), params.max_flow_speed)
+	var out := _boost(dir * spd, bonus)
 	velocity = Vector3(out.x, params.jump_velocity(), out.z)
+	if quick:
+		_apply_perfect(&"wall_jump", false)
 	_since_jump_press = INF
 	_wall_cooldown = WALL_COOLDOWN
 	_last_wall_normal = wall_normal
@@ -615,6 +686,7 @@ func _try_slide() -> bool:
 	if horizontal_speed() < params.slide_min_speed:
 		return false
 	_since_crouch_press = INF
+	_add_momentum(params.momentum_gain_small)
 	_set_height(params.slide_height)
 	_set_state(State.SLIDE)
 	slide_started.emit()
@@ -697,6 +769,7 @@ func _check_crash(h_before: Vector3) -> void:
 			continue  # 段の角など、斜めの接触は激突にしない
 		var into := -h_before.dot(n)
 		if into > CRASH_SPEED:
+			momentum *= 1.0 - params.momentum_crash_loss
 			crashed.emit(into)
 			return
 
@@ -747,17 +820,89 @@ func _try_step_up(motion: Vector3) -> bool:
 	return false
 
 
-## 速度を目標へ寄せる。通常最高を超えた分は地上で毎秒 overspeed_decay ずつ戻す
+## 速度を目標へ寄せる。control = 1 が地上、air_control が空中
+## - 進行方向と逆に倒すとブレーキ（地上 brake_decel、空中はその air_brake 倍）。慣性を消す手段
+## - 空中で何も倒していなければ勢いをそのまま保つ
+## - 通常最高を超えた分は、地上で毎秒 overspeed_decay ずつ戻る（勢い値が高いほどゆっくり）
 func _steer(h: Vector3, target: Vector3, control: float, delta: float) -> Vector3:
 	var spd := h.length()
-	if target != Vector3.ZERO and spd > params.run_speed and h.dot(target) > 0.0:
+	var grounded := control >= 1.0
+	braking = false
+	if target == Vector3.ZERO:
+		if not grounded:
+			return _soft_cap(h, delta)
+		return h.move_toward(Vector3.ZERO, params.run_speed / params.decel_time * delta)
+	if spd > 0.5 and h.dot(target) < 0.0:
+		braking = spd > params.walk_speed
+		var brake := params.brake_decel * (1.0 if grounded else params.air_brake)
+		return h.move_toward(target, brake * delta)
+	if spd > params.run_speed:
 		var new_spd := spd
-		if control >= 1.0:
-			new_spd = maxf(spd - params.overspeed_decay * delta, params.run_speed)
+		if grounded:
+			new_spd = maxf(spd - params.overspeed_decay * (1.0 - 0.5 * momentum) * delta, params.run_speed)
 		var turned := h.normalized().slerp(target.normalized(), minf(1.0, 6.0 * control * delta))
-		return turned * minf(new_spd, params.max_flow_speed)
-	var rate := params.run_speed / (params.accel_time if target != Vector3.ZERO else params.decel_time)
-	return h.move_toward(target, rate * control * delta).limit_length(params.max_flow_speed)
+		return _soft_cap(turned * new_spd, delta)
+	return h.move_toward(target, params.run_speed / params.accel_time * control * delta)
+
+
+## 上限を超えていたら少しずつ上限まで戻す（勢いを失った瞬間に速度が飛ばないように）
+func _soft_cap(h: Vector3, delta: float) -> Vector3:
+	var cap := flow_cap()
+	var spd := h.length()
+	if spd <= cap:
+		return h
+	return h * (maxf(cap, spd - params.overspeed_decay * 4.0 * delta) / spd)
+
+
+## 速度の上乗せ。上限（flow_cap）までは伸び、上限を超えていても今より遅くはしない
+func _boost(h: Vector3, bonus: float) -> Vector3:
+	var spd := h.length()
+	return (h * (1.0 + bonus)).limit_length(maxf(flow_cap(), spd))
+
+
+func _add_momentum(amount: float) -> void:
+	momentum = clampf(momentum + amount, 0.0, 1.0)
+
+
+## Perfect：勢い値を足し、boost=true なら速度も上乗せする（ヴォルト・壁ジャンプ・スライドジャンプは呼び出し側で上乗せ済み）
+func _apply_perfect(kind: StringName, boost: bool) -> void:
+	perfect_count += 1
+	_add_momentum(params.momentum_gain_perfect)
+	if boost:
+		var h := _boost(Vector3(velocity.x, 0.0, velocity.z), params.perfect_speed_bonus)
+		velocity = Vector3(h.x, velocity.y, h.z)
+	perfect.emit(kind)
+
+
+## 止まっている間だけ勢い値が減る（普通に走っている間は減らない：仕様書 5章）
+func _update_momentum(delta: float) -> void:
+	if horizontal_speed() < params.walk_speed and state in [State.GROUND, State.LEDGE_HANG, State.HARD_LAND]:
+		momentum = maxf(momentum - params.momentum_stop_decay * delta, 0.0)
+
+
+## クイックターン：180°振り向く。地上では速度の一部を逆向きに残し、そのまま反対へ走り出せる
+func _quick_turn() -> void:
+	match state:
+		State.GROUND, State.SLIDE, State.ROLL:
+			var h := Vector3(velocity.x, 0.0, velocity.z) * -params.quick_turn_keep
+			velocity = Vector3(h.x, velocity.y, h.z)
+			if state != State.GROUND and VaultProbe.can_stand(self, _capsule.radius, STAND_HEIGHT):
+				_set_height(STAND_HEIGHT)
+				_set_state(State.GROUND)
+		State.WALL_CLIMB:
+			# 駆け上がりの途中で振り向いて、壁を蹴って後ろへ
+			velocity = wall_normal * params.run_speed * 0.6 + Vector3.UP * params.jump_velocity() * 0.8
+			_wall_cooldown = WALL_COOLDOWN
+			_last_wall_normal = wall_normal
+			_leave_ground()
+			_jumped = true
+			wall_jumped.emit()
+		State.AIR:
+			pass  # 空中は向きだけ変える
+		_:
+			return
+	rig.start_turn(PI, params.quick_turn_time)
+	quick_turned.emit()
 
 
 ## スティックの倒し量で速度を決める：半倒しで歩き、全倒しで走り
@@ -773,7 +918,7 @@ func _desired_velocity() -> Vector3:
 		speed = params.walk_speed * m / 0.5
 	else:
 		speed = lerpf(params.walk_speed, params.run_speed, (m - 0.5) / 0.5)
-	var dir := Basis(Vector3.UP, rig.yaw) * Vector3(input.x, 0.0, input.y)
+	var dir := Basis(Vector3.UP, rig.move_yaw()) * Vector3(input.x, 0.0, input.y)
 	return dir.normalized() * speed
 
 
@@ -782,7 +927,7 @@ func _facing() -> Vector3:
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	if h.length() > 1.0:
 		return h.normalized()
-	return Basis(Vector3.UP, rig.yaw) * Vector3.FORWARD
+	return Basis(Vector3.UP, rig.move_yaw()) * Vector3.FORWARD
 
 
 func _along_wall(h: Vector3) -> Vector3:
@@ -827,3 +972,6 @@ func _continuous_haptics() -> void:
 		State.SLIDE:
 			var k := clampf(horizontal_speed() / params.run_speed, 0.0, 1.5)
 			Haptics.hold(0.1 * k, 0.25 * k)
+		State.GROUND:
+			if braking:
+				Haptics.hold(0.15, 0.1)  # 足を滑らせて止まる

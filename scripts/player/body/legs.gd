@@ -61,6 +61,8 @@ func _pose(key: StringName, leg_phase: float) -> Vector3:
 	var right := key == &"r"
 	match p.state:
 		Player.State.GROUND:
+			if p.braking:
+				return Vector3(40.0, 25.0, 30.0) if right else Vector3(25.0, 45.0, 25.0)  # 脚を前に突っ張る
 			var s := clampf(p.horizontal_speed() / prm.run_speed, 0.0, 1.3)
 			var hip := lerpf(4.0, 38.0, s) * sin(leg_phase)
 			var swing := pow(maxf(cos(leg_phase), 0.0), 1.5)  # 脚が前へ戻る間に膝を畳む

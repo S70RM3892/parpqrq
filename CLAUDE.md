@@ -21,7 +21,8 @@
 - `scripts/autoload/haptics.gd` — コントローラー振動
 - `scenes/ui/debug_overlay.tscn` — FPS・フレーム時間・ゲート判定（F3 / Back）
 - `scenes/ui/tuning_panel.tscn` — 数値の調整パネル（F1 / R3）
-- `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義）、`course_timer.gd` — 計測、`checkpoint.gd` — 落下時の戻り先
+- `scripts/ui/flow_hud.gd` + `shaders/flow_edge.gdshader` — 勢い値（画面の縁の光）とPerfect表示・スロー
+- `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義）、`course_timer.gd` — 計測・区間タイム・メダル・ゴースト、`checkpoint.gd` — 落下時の戻り先
 - `tools/build_body.gd` — `assets/source/*.glb` から体のメッシュを作り直す（`godot --headless --path . -s tools/build_body.gd`）
 
 ## 作業ルール
@@ -29,6 +30,7 @@
 - コミット前にスモークテストを通す: `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`（終了コード0で合格）。コースを自動で走り、全技が仕様どおり出るかを見る
 - 手触りの数値（ジャンプの高さ、カメラ演出の強さなど `MovementParams` と演出の値）は勝手に変えない。持ち主が走りながら決める。
 - 入力は InputMap のアクション名で扱う（キー・ボタンを直接読まない）。
+- スモークテストは記録を `smoke_test` のIDで取る（持ち主の自己ベストとゴーストを上書きしない）。
 
 ## GDScriptの落とし穴（このプロジェクトで踏んだもの）
 - ラムダはローカル変数を値でコピーする。シグナルで数を数える時は Dictionary/Array に入れる
