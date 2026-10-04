@@ -30,6 +30,7 @@ const SHAKE_DECAY := 1.5            ## トラウマ/秒
 const SHAKE_ROT_DEG := Vector3(2.0, 2.0, 3.0)
 const SHAKE_POS := 0.03
 const SHAKE_FREQ := 22.0
+const STEP_SMOOTH_TIME := 0.09      ## s。段差を乗り越えた時、目線がこの時定数で追いつく
 
 ## 目の位置。Player の EyeAnchor を指す
 @export var eye: Node3D
@@ -103,7 +104,7 @@ func _process(delta: float) -> void:
 		stick *= stick.length()
 		var step := STICK_DEG_PER_SEC * delta
 		_add_look(-stick.x * step * Settings.sensitivity_x, -stick.y * step * Settings.sensitivity_y * _invert())
-	_step_offset *= exp(-delta / 0.05)
+	_step_offset *= exp(-delta / STEP_SMOOTH_TIME)
 	if eye != null:
 		global_position = eye.get_global_transform_interpolated().origin + Vector3.UP * _step_offset
 	if player != null:

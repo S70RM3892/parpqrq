@@ -58,7 +58,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 8)
 shape = SubResource("Box_start")
 
 [node name="GoalArea" type="Area3D" parent="CourseTimer"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -126)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -155)
 
 [node name="Shape" type="CollisionShape3D" parent="CourseTimer/GoalArea"]
 shape = SubResource("Box_goal")
@@ -80,7 +80,7 @@ theme_override_constants/outline_size = 8
 theme_override_font_sizes/font_size = 48
 
 [node name="Checkpoint" type="Area3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -79)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -96)
 script = ExtResource("4_cp")
 
 [node name="Shape" type="CollisionShape3D" parent="Checkpoint"]

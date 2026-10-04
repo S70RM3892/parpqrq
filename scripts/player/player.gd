@@ -169,6 +169,11 @@ func _ground(delta: float) -> void:
 		return
 
 	_move(delta, true)
+	if not is_on_floor():
+		# 坂の頂上を越えた瞬間は上向きに動いているので、Godotの床吸着が効かない。自分で吸着させる
+		apply_floor_snap()
+		if is_on_floor():
+			velocity.y = 0.0
 	if is_on_floor():
 		_since_floor = 0.0
 	else:
@@ -188,7 +193,7 @@ func _air(delta: float) -> void:
 	if _jumped and not _jump_cut_done and velocity.y > 0.0 and not Input.is_action_pressed(&"jump"):
 		velocity.y *= 1.0 - params.jump_cut_max
 		_jump_cut_done = true
-	if _try_ledge_from_air() or _try_wall_run():
+	if _try_ledge_from_air() or _try_wall_run() or _try_wall_climb_from_air():
 		return
 	_move(delta, false)
 	_air_peak_y = maxf(_air_peak_y, global_position.y)
@@ -291,9 +296,15 @@ func _wall_climb(delta: float) -> void:
 	if r != null:
 		_start_climb(r)
 		return
-	velocity = Vector3(-wall_normal.x, velocity.y, -wall_normal.z)
-	_move(delta, false)
-	if velocity.y <= 0.0 or VaultProbe.front_wall(self, -wall_normal, _capsule.radius + WALL_DETECT, 1.6).is_empty():
+	# 壁に着くまでは寄っていき、着いたら軽く押し付ける
+	var toward := maxf(Vector3(velocity.x, 0.0, velocity.z).dot(-wall_normal), 1.0)
+	if is_on_wall():
+		toward = 1.0
+	velocity = Vector3(-wall_normal.x * toward, velocity.y, -wall_normal.z * toward)
+	_move(delta, false, false)
+	# 寄っていく間（最初の0.3秒）は遠くまで壁を見る
+	var look := _capsule.radius + (WALL_DETECT if state_time > 0.3 else 2.5)
+	if velocity.y <= 0.0 or VaultProbe.front_wall(self, -wall_normal, look, 1.6).is_empty():
 		_drop_from_wall(wall_normal * 0.5)
 
 
@@ -449,7 +460,8 @@ func _try_vault() -> bool:
 
 ## 地上から：向いている方向に手の届く縁があれば登る
 func _try_climb() -> bool:
-	var r := VaultProbe.ledge(self, _facing(), 0.7, params.vault_min_height, params.climb_max_height,
+	var reach := maxf(0.7, horizontal_speed() * params.vault_reach_time)
+	var r := VaultProbe.ledge(self, _facing(), reach, params.vault_min_height, params.climb_max_height,
 			params.vault_auto_align_deg, _capsule.radius, STAND_HEIGHT)
 	if r == null:
 		return false
@@ -479,20 +491,42 @@ func _try_wall_climb() -> bool:
 	if horizontal_speed() < params.wallrun_up_min_speed:
 		return false
 	var dir := _facing()
-	var hit := VaultProbe.front_wall(self, dir, _capsule.radius + 0.7)
+	# 速いほど遠くから届く（ヴォルトと同じ考え方）
+	var reach := _capsule.radius + maxf(0.7, horizontal_speed() * params.vault_reach_time)
+	var hit := VaultProbe.front_wall(self, dir, reach)
 	if hit.is_empty():
 		return false
+	return _start_wall_climb(hit, dir)
+
+
+func _start_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
 	var n: Vector3 = hit.normal
 	n = Vector3(n.x, 0.0, n.z).normalized()
 	if rad_to_deg((-n).angle_to(dir)) > params.vault_auto_align_deg:
 		return false
+	if _wall_cooldown > 0.0 and n.dot(_last_wall_normal) > 0.9:
+		return false
 	wall_normal = n
-	velocity = Vector3(0.0, sqrt(2.0 * params.gravity() * params.wallrun_up_height), 0.0)
+	# 壁まで少し距離があれば、その分は今の速度で寄っていく（_wall_climb が壁へ押し付ける）
+	var up := sqrt(2.0 * params.gravity() * params.wallrun_up_height)
+	velocity = Vector3(0.0, maxf(up, velocity.y), 0.0) - n * minf(horizontal_speed(), params.run_speed)
 	_since_jump_press = INF
 	_set_state(State.WALL_CLIMB)
 	_jumped = true
 	wallrun_started.emit()
 	return true
+
+
+## ジャンプして0.5秒以内に正面の壁に着いたら、空中からでも縦ウォールランに入る
+func _try_wall_climb_from_air() -> bool:
+	if not _jumped or state_time > 0.5 or horizontal_speed() < params.wallrun_up_min_speed:
+		return false
+	var dir := _facing()
+	var hit := VaultProbe.front_wall(self, dir, _capsule.radius + WALL_DETECT)
+	if hit.is_empty():
+		return false
+	# 縁に手が届く高さなら、縦ウォールランではなくレッジグラブ側に任せる
+	return _start_wall_climb(hit, dir)
 
 
 ## 空中で縁に手が届いたら掴む。前を押していればそのまま登る、押していなければぶら下がる
@@ -547,8 +581,8 @@ func _try_wall_run() -> bool:
 	wall_side = wall.side
 	var along := _along_wall(h)
 	var keep := along * h.length()
-	# 跳んだ勢いを残しつつ、上向きを lift〜2×lift に収める（落ちながら張り付いても少し持ち上げる）
-	velocity = Vector3(keep.x, clampf(velocity.y, params.wallrun_entry_lift, params.wallrun_entry_lift * 2.0), keep.z)
+	# 跳んだ勢いを残しつつ、上向きを lift〜max_lift に収める（落ちながら張り付いても少し持ち上げる）
+	velocity = Vector3(keep.x, clampf(velocity.y, params.wallrun_entry_lift, params.wallrun_entry_max_lift), keep.z)
 	_set_state(State.WALL_RUN)
 	wallrun_started.emit()
 	return true
@@ -629,8 +663,8 @@ static func _ease_in(t: float) -> float:
 
 # --- 移動の下回り -------------------------------------------------------------
 
-## 重力をかけて動かす。地上では段差を自動で乗り越える
-func _move(delta: float, grounded: bool) -> void:
+## 重力をかけて動かす。地上では段差を自動で乗り越える。check_crash=false は壁に触れるのが意図どおりの時
+func _move(delta: float, grounded: bool, check_crash: bool = true) -> void:
 	var vy := velocity.y
 	var g := params.gravity()
 	if vy < 0.0:
@@ -645,7 +679,8 @@ func _move(delta: float, grounded: bool) -> void:
 	var h_before := Vector3(velocity.x, 0.0, velocity.z)
 	velocity.y = vy_avg
 	move_and_slide()
-	_check_crash(h_before)
+	if check_crash:
+		_check_crash(h_before)
 	if is_equal_approx(velocity.y, vy_avg):
 		velocity.y = vy_next
 
@@ -703,6 +738,8 @@ func _try_step_up(motion: Vector3) -> bool:
 			continue
 		var before := global_position.y
 		global_position = moved.origin + down.get_travel()
+		# 補間を切ってから目線の跳ねを吸収する（補間が残ると旧位置との間を描いて、目線が一度沈んでから跳ねる）
+		reset_physics_interpolation()
 		rig.absorb_step(global_position.y - before)
 		apply_floor_snap()
 		return true
