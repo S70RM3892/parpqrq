@@ -105,15 +105,14 @@ static func set_route_visible(on: bool) -> void:
 	RenderingServer.global_shader_parameter_set(&"route_strength", 1.0 if on else 0.0)
 
 
-## 時間帯の夜の度合い（Atmosphere.PRESETS の night）
-static func night_amount_for(time: StringName) -> float:
-	var p: Dictionary = Atmosphere.PRESETS.get(time, {})
-	return float(p.get("night", 0.0))
-
-
 static func set_night(amount: float) -> void:
 	night_amount = clampf(amount, 0.0, 1.0)
 	RenderingServer.global_shader_parameter_set(&"night", night_amount)
+
+
+## 雨上がりの度合い（広い屋上に水たまり。level.gdshader）
+static func set_wet(amount: float) -> void:
+	RenderingServer.global_shader_parameter_set(&"wet", clampf(amount, 0.0, 1.0))
 
 
 ## 光を焼く時の面の色（線形）。シェーダーの模様（窓・縞・枠）をならした平均の色

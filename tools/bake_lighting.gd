@@ -80,7 +80,7 @@ func _bake(id: String, baker: String) -> bool:
 	var built := _build_geometry(id)
 	var geo: LevelGeometry = built[0]
 	var area: Dictionary = built[1]
-	var p: Dictionary = Atmosphere.PRESETS.get(area.time, Atmosphere.PRESETS[&"morning"])
+	var p: Dictionary = Atmosphere.preset_for(area.time, Atmosphere.step_for(id))
 	LevelStyle.set_night(p.night)
 	# atmosphere.gd の apply_preset と同じ太陽の向き
 	var elev := deg_to_rad(p.elevation as float)

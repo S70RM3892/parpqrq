@@ -54,9 +54,13 @@ func _ready() -> void:
 	add_child(geo)
 	geometry_hash = geo.lightmap_hash
 	lightmap_ok = LevelLighting.apply(geo, course_id)
+	var sky := Atmosphere.preset_for(area.time, Atmosphere.step_for(course_id))
 	if bool(area.get("lit", false)):
-		_spawn_lights(geo.lights, LevelStyle.night_amount_for(area.time))
-	_spawn_reflection_probes(geo.glass_spots)
+		_spawn_lights(geo.lights, float(sky.night))
+	var probe_spots := geo.glass_spots.duplicate()
+	if float(sky.get("wet", 0.0)) >= WET_PROBES:
+		probe_spots.append_array(_along_route(builder.route_points, PROBE_MERGE * 1.05))
+	_spawn_reflection_probes(probe_spots, MAX_PROBES_WET if float(sky.get("wet", 0.0)) >= WET_PROBES else MAX_PROBES)
 	var grabs := GrabLines.new()
 	grabs.name = "GrabLines"
 	grabs.lines = builder.grab_lines
@@ -65,6 +69,7 @@ func _ready() -> void:
 	var atmo := Atmosphere.new()
 	atmo.name = "Atmosphere"
 	atmo.preset = area.time
+	atmo.step = Atmosphere.step_for(course_id)
 	atmo.fog_floor = builder.min_floor_y - 6.0
 	add_child(atmo)
 
@@ -152,12 +157,31 @@ func _spawn_lights(list: Array[Dictionary], night_k: float) -> void:
 
 
 ## ガラスの床・天窓の上に反射プローブ（一度だけ撮る）。ガラスに周りのビルや手すりが映る。
+## 雨上がりのコース（wet が WET_PROBES 以上）はルート沿いにも置き、水たまりに窓・看板・街灯が映る。
 ## 近いものはまとめ、MAX_PROBES までにする（読み込みの時に撮るので数を抑える）
 const MAX_PROBES := 6
+const MAX_PROBES_WET := 32
+const WET_PROBES := 0.25
 const PROBE_MERGE := 35.0
 
 
-func _spawn_reflection_probes(spots: PackedVector3Array) -> void:
+## 道筋に沿って step m ごとの点
+func _along_route(points: PackedVector3Array, step: float) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var left := 0.0
+	for i: int in range(1, points.size()):
+		var a := points[i - 1]
+		var b := points[i]
+		var seg := a.distance_to(b)
+		var t := left
+		while t < seg:
+			out.append(a.lerp(b, t / seg))
+			t += step
+		left = t - seg
+	return out
+
+
+func _spawn_reflection_probes(spots: PackedVector3Array, max_count: int) -> void:
 	var placed: Array[Vector3] = []
 	for p: Vector3 in spots:
 		var near := false
@@ -168,13 +192,13 @@ func _spawn_reflection_probes(spots: PackedVector3Array) -> void:
 		if near:
 			continue
 		placed.append(p)
-		if placed.size() >= MAX_PROBES:
+		if placed.size() >= max_count:
 			break
 	for p: Vector3 in placed:
 		var probe := ReflectionProbe.new()
 		probe.update_mode = ReflectionProbe.UPDATE_ONCE
 		probe.size = Vector3(PROBE_MERGE + 10.0, 24.0, PROBE_MERGE + 10.0)
-		probe.origin_offset = Vector3(0, -8.0, 0)
+		probe.origin_offset = Vector3(0, -6.5, 0)  # 床から1.5 m で撮る
 		probe.position = p + Vector3.UP * 8.0
 		probe.box_projection = true
 		probe.interior = false

@@ -18,6 +18,7 @@ global uniform float route_strength; // 1 = ルートカラーON、0 = OFF（設
 global uniform float night;          // 0 = 昼 〜 1 = 夜（窓・照明が灯る）
 global uniform sampler2D level_lightmap : filter_linear, repeat_disable;
 global uniform float lightmap_on;    // 1 = このコースの焼いた光がある
+global uniform float wet;            // 0 = 乾いた屋上 〜 1 = 雨上がり（水たまり）
 
 uniform int pattern = 0; // 0 無地 1 コンクリ 2 金属 3 ガラス 4 砂利 5 ビル 6 ルート 7 照明 8 工事の縞
 uniform vec3 albedo : source_color = vec3(0.92, 0.92, 0.9);
@@ -57,6 +58,14 @@ void vertex() {
 float grid_line(vec2 g, float w, float fade) {
 	vec2 f = abs(fract(g) - 0.5);
 	return smoothstep(0.5 - w, 0.5 - w * 0.4, max(f.x, f.y)) * fade;
+}
+
+// 滑らかな値ノイズ 0〜1（水たまりの形）
+float vnoise(vec2 x) {
+	vec2 i = floor(x);
+	vec2 f = fract(x);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
 void fragment() {
@@ -184,6 +193,23 @@ void fragment() {
 		// 工事の縞
 		float s = step(0.5, fract((p.x + p.y) / 0.5));
 		col = mix(col, stripe_color, s);
+	}
+
+	// 雨上がりの水たまり（時間帯の wet）：広い屋上の面だけ。縁からは離し、まわりは湿って暗い。
+	// 水面は平らでつるつる（空・看板・街灯が映る。映り込みは空の放射輝度マップと反射プローブ）
+	if (wet > 0.0 && top && (pattern == 1 || pattern == 5) && min(size.x, size.y) > 3.0) {
+		float n = vnoise(world.xz / 3.4 + rnd * 17.0) * 0.72 + vnoise(world.xz / 0.9) * 0.28;
+		float th = mix(0.86, 0.52, wet);
+		float inner = smoothstep(0.5, 1.4, edge_d);
+		float puddle = smoothstep(th, th + 0.035, n) * inner;
+		float damp = smoothstep(th - 0.14, th, n) * inner;
+		col *= mix(1.0, 0.55, max(damp * 0.55, puddle));
+		rough = mix(mix(rough, 0.4, damp * 0.7), 0.04, puddle);
+		nxy *= 1.0 - puddle * 0.95;
+		cavity = mix(cavity, 1.0, puddle);
+	}
+	if (wet > 0.0 && top && pattern != 7) {
+		rough *= 1.0 - wet * 0.25;  // 全体に少し湿る
 	}
 
 	// 汚れ：側面の上端から垂れる雨だれと、足元のはね（白い壁が真っ白にならない）
