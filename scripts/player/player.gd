@@ -27,6 +27,8 @@ signal crashed(speed: float)
 ## Perfect判定。kind = &"landing_jump" / &"roll" / &"vault" / &"wall_jump" / &"slide_jump"
 signal perfect(kind: StringName)
 signal quick_turned
+## リトライ・チェックポイント復帰・落下で戻った。to_start = スタート地点へ戻った（計測をやり直す）
+signal respawned(to_start: bool)
 
 enum State { GROUND, AIR, VAULT, ROLL, HARD_LAND, CLIMB, LEDGE_HANG, WALL_RUN, WALL_CLIMB, SLIDE }
 
@@ -36,6 +38,7 @@ const STAND_HEIGHT := 1.8     ## m。立っている時の当たり判定
 const HANG_DROP := 1.9        ## m。ぶら下がり中、縁から足元まで
 const WALL_DETECT := 0.45     ## m。体の表面から壁までの検出距離
 const WALL_COOLDOWN := 0.35   ## s。離れた直後の同じ壁には張り付かない
+const RETRY_HOLD := 0.3       ## s。リトライをこれだけ押し続けるとチェックポイントへ（仕様書 5章）
 
 @export var params: MovementParams
 
@@ -57,6 +60,16 @@ var momentum: float = 0.0
 var perfect_count: int = 0
 ## 進行方向と逆に倒して減速中（カメラ・脚・振動が読む）
 var braking: bool = false
+## これより下に落ちたらチェックポイントへ戻す（コースごとに道の高さより下に置く）
+var kill_y: float = -30.0
+## リトライを押している時間（チェックポイント復帰の溜め。画面の演出が読む）。押していなければ -1
+var retry_hold: float = -1.0
+## false の間は入力を読まない（ゴール後・リプレイ中）
+var input_enabled: bool = true
+## 今立っている床の素材（足音が読む）。&"concrete" / &"metal" / &"glass" / &"gravel"
+var floor_surface: StringName = &"concrete"
+## 今ジャンプすると出る技（照準点が広がる：仕様書 8章）。&"" = 普通のジャンプ
+var move_hint: StringName = &""
 
 var _since_floor: float = 0.0
 var _since_jump_press: float = INF
@@ -73,6 +86,8 @@ var _move_speed_in: float = 0.0
 var _last_wall_normal: Vector3 = Vector3.ZERO
 var _wall_cooldown: float = 0.0
 var _climb_rise_d: float = 0.0
+## 縦ウォールランに入る直前の水平速度（駆け上がって縁を登った後の速さに使う）
+var _wall_climb_speed_in: float = 0.0
 ## Perfect判定用の時刻（秒）
 var _clock: float = 0.0
 var _land_clock: float = -INF
@@ -105,21 +120,20 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if Input.is_action_just_pressed(&"retry"):
-		respawn()
+	if _update_retry(delta):
 		return
-	if global_position.y < -30.0:
+	if global_position.y < kill_y:
 		respawn(checkpoint)
 		return
 	_clock += delta
-	if Input.is_action_just_pressed(&"jump"):
+	if _just(&"jump"):
 		_jump_press_clock = _clock
-	_since_jump_press = 0.0 if Input.is_action_just_pressed(&"jump") else _since_jump_press + delta
-	_since_crouch_press = 0.0 if Input.is_action_just_pressed(&"crouch") else _since_crouch_press + delta
+	_since_jump_press = 0.0 if _just(&"jump") else _since_jump_press + delta
+	_since_crouch_press = 0.0 if _just(&"crouch") else _since_crouch_press + delta
 	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
 	state_time += delta
 	braking = false
-	if Input.is_action_just_pressed(&"quick_turn"):
+	if _just(&"quick_turn"):
 		_quick_turn()
 
 	match state:
@@ -146,6 +160,8 @@ func _physics_process(delta: float) -> void:
 	_update_stride(delta)
 	_update_momentum(delta)
 	_continuous_haptics()
+	if Engine.get_physics_frames() % 3 == 0:
+		_update_move_hint()
 
 
 func horizontal_speed() -> float:
@@ -164,6 +180,7 @@ func stride_phase_interpolated() -> float:
 
 ## 引数なし = スタート地点へ（リトライ）。落下時はチェックポイントへ
 func respawn(at: Transform3D = spawn) -> void:
+	var to_start := at == spawn
 	global_transform = at
 	velocity = Vector3.ZERO
 	_pending_time = -1.0
@@ -176,6 +193,31 @@ func respawn(at: Transform3D = spawn) -> void:
 	_set_state(State.AIR)
 	reset_physics_interpolation()
 	rig.snap(at.basis.get_euler().y)
+	respawned.emit(to_start)
+
+
+## リトライ（仕様書 5章「即リトライ」）：
+## 押して離せばスタートへ（離した瞬間。0.5秒以内）、RETRY_HOLD 押し続ければチェックポイントへ。
+## 押した瞬間に戻さないのは、長押しでチェックポイントを選んだ時に計測を消さないため。
+func _update_retry(delta: float) -> bool:
+	if not input_enabled:
+		retry_hold = -1.0
+		return false
+	if Input.is_action_just_pressed(&"retry"):
+		retry_hold = 0.0
+	elif retry_hold >= 0.0:
+		if not Input.is_action_pressed(&"retry"):
+			retry_hold = -1.0
+			respawn()
+			return true
+		retry_hold += delta
+		if retry_hold >= RETRY_HOLD - 0.001:
+			retry_hold = -2.0  # 離すまで次を受け付けない
+			respawn(checkpoint)
+			return true
+	elif retry_hold < -1.5 and not Input.is_action_pressed(&"retry"):
+		retry_hold = -1.0
+	return false
 
 
 # --- 状態 ---------------------------------------------------------------
@@ -230,7 +272,7 @@ func _air(delta: float) -> void:
 			_jump()
 			_move(delta, false)
 		return
-	if _jumped and not _jump_cut_done and velocity.y > 0.0 and not Input.is_action_pressed(&"jump"):
+	if _jumped and not _jump_cut_done and velocity.y > 0.0 and not _held(&"jump"):
 		velocity.y *= 1.0 - params.jump_cut_max
 		_jump_cut_done = true
 	if _try_ledge_from_air() or _try_wall_run() or _try_wall_climb_from_air():
@@ -276,11 +318,11 @@ func _climb(delta: float) -> void:
 
 func _ledge_hang(_delta: float) -> void:
 	velocity = Vector3.ZERO
-	var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+	var input := _move_input()
 	if _since_jump_press <= params.move_buffer or input.y < -0.6:
 		_start_climb(move)
 		return
-	if Input.is_action_just_pressed(&"crouch") or input.y > 0.6:
+	if _just(&"crouch") or input.y > 0.6:
 		_drop_from_wall(move.dir * -1.0)
 		return
 	# 横移動：縁が続く所までだけ動く
@@ -410,6 +452,10 @@ func _roll(delta: float) -> void:
 	elif t >= 0.5 and _since_jump_press <= params.move_buffer:
 		_set_state(State.GROUND)
 		_ground_move_or_jump()
+	elif t >= 0.5 and _since_crouch_press <= params.move_buffer and horizontal_speed() >= params.slide_min_speed:
+		# 転がり終わりにしゃがみを先行入力していれば、そのままスライドへ（ローリング → スライド）
+		_set_state(State.GROUND)
+		_try_slide()
 	elif t >= 1.0:
 		_set_state(State.GROUND)
 
@@ -470,7 +516,7 @@ func _land() -> void:
 		else:
 			_pending_drop = drop
 			_pending_time = 0.0
-	elif _since_crouch_press <= params.roll_window_before or Input.is_action_pressed(&"crouch"):
+	elif _since_crouch_press <= params.roll_window_before or _held(&"crouch"):
 		_try_slide()  # 着地にしゃがみを合わせると、そのままスライドへ
 
 
@@ -496,12 +542,18 @@ func _start_hard_land(drop: float) -> void:
 		_set_state(State.HARD_LAND)
 
 
-func _try_vault() -> bool:
+## 今ジャンプしたらヴォルトになる障害物（無ければ null）
+func _find_vault() -> VaultProbe.Result:
 	var spd := horizontal_speed()
 	if spd < params.vault_min_speed:
-		return false
+		return null
 	var dir := Vector3(velocity.x, 0.0, velocity.z).normalized()
-	var r := VaultProbe.probe(self, dir, spd, params, _capsule.radius, STAND_HEIGHT)
+	return VaultProbe.probe(self, dir, spd, params, _capsule.radius, STAND_HEIGHT)
+
+
+func _try_vault() -> bool:
+	var spd := horizontal_speed()
+	var r := _find_vault()
 	if r == null:
 		return false
 	# 体が障害物に着く vault_ideal_time 前に押していればPerfect（先行入力で遅れて発動した分も押した時刻で測る）
@@ -523,10 +575,14 @@ func _try_vault() -> bool:
 
 
 ## 地上から：向いている方向に手の届く縁があれば登る
-func _try_climb() -> bool:
+func _find_climb() -> VaultProbe.Result:
 	var reach := maxf(0.7, horizontal_speed() * params.vault_reach_time)
-	var r := VaultProbe.ledge(self, _facing(), reach, params.vault_min_height, params.climb_max_height,
+	return VaultProbe.ledge(self, _facing(), reach, params.vault_min_height, params.climb_max_height,
 			params.vault_auto_align_deg, _capsule.radius, STAND_HEIGHT)
+
+
+func _try_climb() -> bool:
+	var r := _find_climb()
 	if r == null:
 		return false
 	_start_climb(r)
@@ -537,7 +593,8 @@ func _start_climb(r: VaultProbe.Result) -> void:
 	move = r
 	move_progress = 0.0
 	move.start = global_position
-	_move_speed_in = horizontal_speed()
+	# 縦ウォールランから登る時は、壁に押し付けている速さ（約1 m/s）ではなく駆け込んだ速さで登りきる
+	_move_speed_in = _wall_climb_speed_in if state == State.WALL_CLIMB else horizontal_speed()
 	var k := clampf(_move_speed_in / params.run_speed, 0.0, 1.0)
 	_move_duration = params.climb_time * lerpf(1.0, params.climb_fast_mult, k)
 	# 前面との距離を測り直す（ぶら下がりや縦ウォールランから来た時は start が変わっている）
@@ -552,26 +609,41 @@ func _start_climb(r: VaultProbe.Result) -> void:
 
 
 ## 縦のウォールラン：壁に正対してジャンプ
-func _try_wall_climb() -> bool:
+## 今ジャンプしたら縦ウォールランになる壁（無ければ空）
+func _find_wall_climb() -> Dictionary:
 	if horizontal_speed() < params.wallrun_up_min_speed:
-		return false
+		return {}
 	var dir := _facing()
 	# 速いほど遠くから届く（ヴォルトと同じ考え方）
 	var reach := _capsule.radius + maxf(0.7, horizontal_speed() * params.vault_reach_time)
 	var hit := VaultProbe.front_wall(self, dir, reach)
+	if hit.is_empty() or not _can_wall_climb(hit, dir):
+		return {}
+	return hit
+
+
+func _try_wall_climb() -> bool:
+	var hit := _find_wall_climb()
 	if hit.is_empty():
 		return false
-	return _start_wall_climb(hit, dir)
+	return _start_wall_climb(hit, _facing())
 
 
-func _start_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
+func _can_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
 	var n: Vector3 = hit.normal
 	n = Vector3(n.x, 0.0, n.z).normalized()
 	if rad_to_deg((-n).angle_to(dir)) > params.vault_auto_align_deg:
 		return false
-	if _wall_cooldown > 0.0 and n.dot(_last_wall_normal) > 0.9:
+	return not (_wall_cooldown > 0.0 and n.dot(_last_wall_normal) > 0.9)
+
+
+func _start_wall_climb(hit: Dictionary, dir: Vector3) -> bool:
+	if not _can_wall_climb(hit, dir):
 		return false
+	var n: Vector3 = hit.normal
+	n = Vector3(n.x, 0.0, n.z).normalized()
 	wall_normal = n
+	_wall_climb_speed_in = horizontal_speed()
 	# 壁まで少し距離があれば、その分は今の速度で寄っていく（_wall_climb が壁へ押し付ける）
 	var up := sqrt(2.0 * params.gravity() * params.wallrun_up_height)
 	velocity = Vector3(0.0, maxf(up, velocity.y), 0.0) - n * minf(horizontal_speed(), params.run_speed)
@@ -609,7 +681,7 @@ func _try_ledge_from_air() -> bool:
 		return false
 	if _wall_cooldown > 0.0 and (-r.dir).dot(_last_wall_normal) > 0.9:
 		return false
-	if want.dot(r.dir) > 0.5 * params.run_speed or Input.is_action_pressed(&"jump"):
+	if want.dot(r.dir) > 0.5 * params.run_speed or _held(&"jump"):
 		_start_climb(r)
 		return true
 	# ぶら下がる：手を縁に、体を壁際へ
@@ -754,6 +826,8 @@ func _move(delta: float, grounded: bool, check_crash: bool = true) -> void:
 	move_and_slide()
 	if check_crash:
 		_check_crash(h_before)
+	if is_on_floor():
+		_read_floor_surface()
 	if is_equal_approx(velocity.y, vy_avg):
 		velocity.y = vy_next
 
@@ -771,6 +845,16 @@ func _check_crash(h_before: Vector3) -> void:
 		if into > CRASH_SPEED:
 			momentum *= 1.0 - params.momentum_crash_loss
 			crashed.emit(into)
+			return
+
+
+## 床の素材をコライダーのメタデータ "surface" から読む（無ければコンクリート）
+func _read_floor_surface() -> void:
+	for i: int in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_normal().y > 0.7:
+			var body := c.get_collider() as Node
+			floor_surface = body.get_meta(&"surface", &"concrete") if body != null else &"concrete"
 			return
 
 
@@ -874,6 +958,25 @@ func _apply_perfect(kind: StringName, boost: bool) -> void:
 	perfect.emit(kind)
 
 
+## 照準点のための先読み（3フレームに1回。地形を調べるだけで何も起こさない）
+func _update_move_hint() -> void:
+	move_hint = &""
+	match state:
+		State.GROUND, State.ROLL:
+			if _find_vault() != null:
+				move_hint = &"vault"
+			elif _find_climb() != null:
+				move_hint = &"climb"
+			elif not _find_wall_climb().is_empty():
+				move_hint = &"wall_climb"
+		State.AIR:
+			var h := Vector3(velocity.x, 0.0, velocity.z)
+			if h.length() >= params.wallrun_min_speed and not VaultProbe.side_wall(self, h.normalized(), _capsule.radius + 1.2).is_empty():
+				move_hint = &"wall_run"
+		State.WALL_RUN, State.LEDGE_HANG, State.WALL_CLIMB:
+			move_hint = &"jump"
+
+
 ## 止まっている間だけ勢い値が減る（普通に走っている間は減らない：仕様書 5章）
 func _update_momentum(delta: float) -> void:
 	if horizontal_speed() < params.walk_speed and state in [State.GROUND, State.LEDGE_HANG, State.HARD_LAND]:
@@ -907,8 +1010,8 @@ func _quick_turn() -> void:
 
 ## スティックの倒し量で速度を決める：半倒しで歩き、全倒しで走り
 func _desired_velocity() -> Vector3:
-	var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
-	if Input.is_action_pressed(&"walk"):
+	var input := _move_input()
+	if _held(&"walk"):
 		input = input.limit_length(0.5)
 	var m := input.length()
 	if m == 0.0:
@@ -975,3 +1078,20 @@ func _continuous_haptics() -> void:
 		State.GROUND:
 			if braking:
 				Haptics.hold(0.15, 0.1)  # 足を滑らせて止まる
+
+
+# --- 入力 ---------------------------------------------------------------
+# 入力はここを通して読む。input_enabled=false（ゴール後・リプレイ中）なら何も押していない扱い
+
+func _just(action: StringName) -> bool:
+	return input_enabled and Input.is_action_just_pressed(action)
+
+
+func _held(action: StringName) -> bool:
+	return input_enabled and Input.is_action_pressed(action)
+
+
+func _move_input() -> Vector2:
+	if not input_enabled:
+		return Vector2.ZERO
+	return Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")

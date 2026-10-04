@@ -1,5 +1,25 @@
 # リリース手順（Android APK）
 
+## 1.0.0-rc1（M3 見た目と音 + M4 コンテンツ）
+
+- versionCode 7 / versionName `1.0.0-rc1`。実機で60fps（docs/M3.md）を確かめたら `1.0.0` にする
+- **署名鍵を新しくした**（下の「署名鍵」）。0.5.0-beta 以前の鍵とは別なので上書き更新できない。**一度アンインストールしてから入れる**（自己ベスト・ゴースト・設定は消える）
+- APK 33.5 MB（arm64-v8a、targetSdk 36）。署名 v2 + v3
+- 起動するとタイトル（初回は「酔いやすい方向け」の選択）。Play を押せばすぐ走れる
+- 16コース（朝の屋上・工事中の高層・夕方の繁華街・夜の駅前）＋フリーラン。メダル・自己ベスト・ゴースト（人形、遠いと矢印）
+- 一時停止（リトライ／チェックポイント／設定／終了）、ゴールの結果、リプレイ（1人称／3人称）
+- 見た目：白い街とルートカラー（遠くは強く、近くは淡く。設定でOFF）、時間帯ごとの空・霧・影、スピードライン・ビネット・塵、照準点
+- 音：風切り・素材別の足音・息づかい・手の音・着地3段階・Perfect、勢い値で重なるBGM
+- 設定画面：酔い対策の全項目、感度、振動、ルートカラー、画質、解像度、フレームレート、音量
+- ローリングの後半にしゃがむとスライドへつながる
+
+## 0.6.0-beta（M2 技の完成）
+
+- versionCode 6 / versionName `0.6.0-beta`、同じ鍵で署名
+- リトライを押して離すとスタートへ、0.3秒押し続けるとチェックポイントへ（計測は続く）。戻る瞬間に白から素早く戻す
+- 縦ウォールランから縁を登った後に止まっていたのを修正（駆け込んだ速さで登りきる）
+- スモークテストにM2ゲート（技のつながりで減速しない）、リトライの時間の確認を追加
+
 ## 0.5.0-beta
 
 - versionCode 5 / versionName `0.5.0-beta`、同じ鍵で署名
@@ -38,8 +58,13 @@
 
 ## 署名鍵
 
-`parkour-release.keystore`（alias `parkour`）は**リポジトリに入れない**。持ち主が保管する。
+`parkour-release.keystore`（alias `parkour`、PKCS12、RSA 4096）は**リポジトリに入れない**。持ち主が保管する。パスワードも同じく。
 鍵を失くすと、同じアプリとして更新できなくなる（入れ直しが必要になる）。
+
+| 使った版 | 証明書 SHA-256 |
+| --- | --- |
+| 1.0.0-rc1 から | `904d7ff87217625dc1405028edb0a7df7349199f55eb05bb5325a1843252ce6f` |
+| 0.1.0-beta〜0.5.0-beta（手元に無く、作り直した） | `5cfc9a363f5b3814899bd53bd4f048964bcd5521e1d2953056bd43a19e7ec3d7` |
 
 ## ビルド
 
@@ -54,8 +79,11 @@ export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=...
 godot --headless --path . --export-release "Android" build/android/parkour-<version>.apk
 ```
 
-4. 確認: `apksigner verify --print-certs build/android/parkour-<version>.apk` の SHA-256 が上と一致すること。
-5. 書き出す前にスモークテストを通す: `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`
+4. 確認: `apksigner verify --print-certs build/android/parkour-<version>.apk` の SHA-256 が上の表（今の鍵）と一致すること。
+5. 書き出す前にテストを通す:
+   - `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`（技の数値）
+   - `godot --headless --path . --fixed-fps 60 res://tests/course_test.tscn`（全コースを走りきれるか）
+   - `godot --headless --path . --fixed-fps 60 res://tests/flow_test.tscn`（画面の流れ）
 
 ## インストール
 

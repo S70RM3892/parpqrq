@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
 [ext_resource type="Resource" path="res://resources/movement_default.tres" id="2_params"]
@@ -12,7 +12,9 @@
 [ext_resource type="ArrayMesh" path="res://assets/body/leg_foot.res" id="10_foot"]
 [ext_resource type="Material" path="res://assets/body/leg_material.tres" id="11_legmat"]
 [ext_resource type="Script" path="res://scripts/ui/flow_hud.gd" id="12_flow"]
-[ext_resource type="Shader" path="res://shaders/flow_edge.gdshader" id="13_edge"]
+[ext_resource type="Shader" path="res://shaders/screen_fx.gdshader" id="13_edge"]
+[ext_resource type="Script" path="res://scripts/player/wind_streaks.gd" id="14_wind"]
+[ext_resource type="Script" path="res://scripts/player/player_audio.gd" id="15_audio"]
 
 [sub_resource type="ShaderMaterial" id="Mat_edge"]
 shader = ExtResource("13_edge")
@@ -115,6 +117,15 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4507, 0.0553)
 mesh = ExtResource("10_foot")
 surface_material_override/0 = ExtResource("11_legmat")
 
+[node name="Wind" type="MultiMeshInstance3D" parent="." node_paths=PackedStringArray("player")]
+top_level = true
+script = ExtResource("14_wind")
+player = NodePath("..")
+
+[node name="Audio" type="Node" parent="." node_paths=PackedStringArray("player")]
+script = ExtResource("15_audio")
+player = NodePath("..")
+
 [node name="FlowHUD" type="CanvasLayer" parent="." node_paths=PackedStringArray("player")]
 script = ExtResource("12_flow")
 player = NodePath("..")
@@ -127,6 +138,15 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+
+[node name="Blink" type="ColorRect" parent="FlowHUD"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 1, 1, 0)
 
 [node name="Perfect" type="Label" parent="FlowHUD"]
 anchors_preset = 7

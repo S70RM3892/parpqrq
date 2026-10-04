@@ -36,6 +36,8 @@ const STEP_SMOOTH_TIME := 0.09      ## s。段差を乗り越えた時、目線�
 
 ## 目の位置。Player の EyeAnchor を指す
 @export var eye: Node3D
+## false の間はクリックでマウスを捕まえない（結果画面・リプレイでボタンを押せるように）
+var mouse_capture_enabled: bool = true
 
 var yaw: float = 0.0
 var pitch: float = 0.0
@@ -89,9 +91,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if mm != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var d: Vector2 = mm.screen_relative * MOUSE_DEG_PER_PX
 		_add_look(-d.x * Settings.sensitivity_x, -d.y * Settings.sensitivity_y * _invert())
-	elif event is InputEventMouseButton and event.is_pressed() and not get_tree().paused:
+	elif event is InputEventMouseButton and event.is_pressed() and not get_tree().paused and mouse_capture_enabled:
 		_capture_mouse(true)
-	elif event.is_action_pressed(&"pause"):
+	elif event.is_action_pressed(&"pause") and mouse_capture_enabled:
 		_capture_mouse(false)
 
 
@@ -132,6 +134,13 @@ func snap(new_yaw: float, new_pitch: float = 0.0) -> void:
 	_trauma = 0.0
 	if eye != null:
 		global_position = eye.global_position
+
+
+## 視線を直接決める（自動走行・リプレイ用。演出の状態は消さない）
+func set_look(new_yaw: float, new_pitch: float) -> void:
+	yaw = wrapf(new_yaw, -PI, PI)
+	pitch = new_pitch
+	_apply_rotation()
 
 
 ## クイックターン：angle（ラジアン）を time 秒で回す

@@ -172,12 +172,18 @@ static func _ray(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, e
 	return space.intersect_ray(q)
 
 
+## 体の形の問い合わせは使い回す（毎フレーム呼ばれる：照準点の先読み・技の判定）
+static var _shape: CapsuleShape3D
+static var _query: PhysicsShapeQueryParameters3D
+
+
 static func _blocked(space: PhysicsDirectSpaceState3D, feet: Vector3, radius: float, height: float, excl: Array[RID]) -> bool:
-	var shape := CapsuleShape3D.new()
-	shape.radius = radius
-	shape.height = height
-	var q := PhysicsShapeQueryParameters3D.new()
-	q.shape = shape
-	q.transform = Transform3D(Basis.IDENTITY, feet + Vector3.UP * (height * 0.5))
-	q.exclude = excl
-	return not space.intersect_shape(q, 1).is_empty()
+	if _query == null:
+		_shape = CapsuleShape3D.new()
+		_query = PhysicsShapeQueryParameters3D.new()
+		_query.shape = _shape
+	_shape.radius = radius
+	_shape.height = height
+	_query.transform = Transform3D(Basis.IDENTITY, feet + Vector3.UP * (height * 0.5))
+	_query.exclude = excl
+	return not space.intersect_shape(_query, 1).is_empty()

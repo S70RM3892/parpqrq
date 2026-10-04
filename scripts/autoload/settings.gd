@@ -30,13 +30,28 @@ var feel_vibration: bool = true       ## コントローラー振動
 # 性能
 var max_fps: int = 60                 ## 60 / 90 / 120
 var render_scale: float = 1.0         ## 0.7〜1.0
+## 0 = 低（影は近くだけ・グローなし・風の粒を減らす）、1 = 高（グローあり：仕様書 6章「強度を抑えて高設定のみ」）
+var graphics_quality: int = 1
+
+# 見た目
+## ルートカラー（使える足場・壁・縁のオレンジ）。上級者向けにOFFにできる。OFFでクリアするとメダルに印が付く
+var route_color: bool = true
+
+# 音量 0.0〜1.0
+var volume_master: float = 1.0
+var volume_music: float = 0.8
+var volume_sfx: float = 1.0
+
+## 初回起動の「酔いやすい方向け」プリセットを選んだか
+var first_run_done: bool = false
 
 const _KEYS: PackedStringArray = [
 	"fov", "sensitivity_x", "sensitivity_y", "invert_y",
 	"speed_fov_strength", "head_bob_strength", "screen_shake_strength",
 	"camera_tilt_strength", "speed_lines_strength", "center_dot", "hitstop_slowmo",
 	"feel_camera", "feel_body", "feel_impact", "feel_vibration",
-	"max_fps", "render_scale",
+	"max_fps", "render_scale", "graphics_quality", "route_color",
+	"volume_master", "volume_music", "volume_sfx", "first_run_done",
 ]
 
 
@@ -48,7 +63,42 @@ func _ready() -> void:
 func apply() -> void:
 	Engine.max_fps = max_fps
 	get_viewport().scaling_3d_scale = clampf(render_scale, 0.7, 1.0)
+	LevelStyle.set_route_visible(route_color)
+	_set_bus_volume(&"Master", volume_master)
+	_set_bus_volume(&"Music", volume_music)
+	_set_bus_volume(&"SFX", volume_sfx)
 	changed.emit()
+
+
+## 酔いやすい方向け（仕様書 8章）：揺れ系を全部30%、画面中央の固定ドットON
+func apply_comfort_preset() -> void:
+	speed_fov_strength = 0.3
+	head_bob_strength = 0.3
+	screen_shake_strength = 0.3
+	camera_tilt_strength = 0.3
+	speed_lines_strength = 0.3
+	center_dot = true
+	apply()
+
+
+## 仕様書 8章の初期値に戻す（視点の感度・音量・画質はそのまま）
+func apply_default_preset() -> void:
+	fov = 90.0
+	speed_fov_strength = 1.0
+	head_bob_strength = 0.7
+	screen_shake_strength = 1.0
+	camera_tilt_strength = 1.0
+	speed_lines_strength = 1.0
+	center_dot = false
+	hitstop_slowmo = true
+	apply()
+
+
+func _set_bus_volume(bus: StringName, v: float) -> void:
+	var idx := AudioServer.get_bus_index(bus)
+	if idx >= 0:
+		AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(v, 0.0001)))
+		AudioServer.set_bus_mute(idx, v <= 0.001)
 
 
 func load_settings() -> void:
