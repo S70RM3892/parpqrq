@@ -59,12 +59,7 @@ func _run() -> void:
 	_check_near("jump apex time", t_top - t_takeoff, mp.jump_apex_time, 1.0 / 60.0 + 0.001)
 	_check_true("landed", p.is_on_floor())
 
-	# リトライでスタート地点へ戻る
-	p.global_position += Vector3(5, 0, 0)
-	Input.action_press(&"retry")
-	await _frames(2)
-	Input.action_release(&"retry")
-	_check_near("retry returns to spawn", p.global_position.distance_to(Vector3(0, 0, 8)), 0.0, 0.05)
+	await _retry_tests(p)
 
 	await _course_run(p)
 	_check_true("ghost saved from the best run (%d samples)" % timer.ghost_samples(), timer.ghost_samples() > 300)
@@ -77,6 +72,60 @@ func _run() -> void:
 	await _wall_jump_test(p)
 	await _ledge_test(p)
 	await _slide_slope_test(p)
+
+
+## 即リトライ（仕様書 5章）：押して離せば0.5秒以内にスタートへ、0.3秒押し続ければチェックポイントへ。落下でもチェックポイントへ
+func _retry_tests(p: Player) -> void:
+	var spawn := p.spawn.origin
+	var c := {"start": 0, "cp": 0}
+	var on_respawn := func(to_start: bool) -> void:
+		if to_start:
+			c.start += 1
+		else:
+			c.cp += 1
+	p.respawned.connect(on_respawn)
+	# 素早く押して離す（6フレーム = 0.1秒）
+	p.global_position += Vector3(5, 0, 0)
+	var frames := 0
+	Input.action_press(&"retry")
+	while c.start == 0 and frames < 60:
+		await get_tree().physics_frame
+		frames += 1
+		if frames == 6:
+			Input.action_release(&"retry")
+	Input.action_release(&"retry")
+	await get_tree().physics_frame
+	_check_near("retry returns to spawn", p.global_position.distance_to(spawn), 0.0, 0.05)
+	_check_true("retry: back at start within 0.5 s of the press (%.2f s)" % (frames / 60.0), c.start == 1 and frames / 60.0 <= 0.5)
+
+	# 長押し：チェックポイントへ（スタートには戻らない）
+	var cp := Transform3D(Basis.IDENTITY, Vector3(-19.0, 0.0, 0.0))
+	p.checkpoint = cp
+	p.global_position += Vector3(3, 0, -3)
+	c.start = 0
+	frames = 0
+	Input.action_press(&"retry")
+	while c.cp == 0 and frames < 60:
+		await get_tree().physics_frame
+		if p.retry_hold >= 0.0 or frames > 0:  # 押したのが見えたフレームから数える（スクリプトの入力は1フレーム遅れる）
+			frames += 1
+	await _frames(10)  # 押したまま：もう一度は戻らない
+	Input.action_release(&"retry")
+	await _frames(3)
+	_check_true("hold retry: back at checkpoint (%.2f s)" % (frames / 60.0), c.cp == 1 and c.start == 0 and p.global_position.distance_to(cp.origin) < 0.3)
+	_check_near("hold retry: takes 0.3 s", frames / 60.0, Player.RETRY_HOLD, 1.5 / 60.0)
+
+	# 道より下に落ちたらチェックポイントへ
+	c.cp = 0
+	p.kill_y = -5.0
+	p.global_position = Vector3(-19.0, -6.0, 8.0)
+	await _frames(2)
+	p.kill_y = -30.0
+	_check_true("fell below the course: back at checkpoint", c.cp == 1 and p.global_position.distance_to(cp.origin) < 0.3)
+	p.respawned.disconnect(on_respawn)
+	p.checkpoint = p.spawn
+	p.respawn()
+	await _frames(10)
 
 
 ## 階段は滑らかに上がる：1フレームの上昇が一定以下（段ごとに跳ねない）、水平速度を保つ
@@ -211,6 +260,7 @@ func _course_run(p: Player) -> void:
 		"vaults": 0, "onto_y": -1.0, "vault_speeds": [], "rolled": false, "roll_end_speed": -1.0,
 		"crash": 0, "min_y": 0.0, "max_y": 0.0, "top_after_wall_climb": 0.0, "hard": 0, "hard_speed": -1.0, "hard_frame": -1,
 		"vault_in": 0.0, "roll_gain": 0.0, "perfects": 0,
+		"wallrun_in": 0.0, "wallrun_out": -1.0, "stall": 0, "running": false,
 	}
 	var on_perfect := func(_k: StringName) -> void: r.perfects += 1
 	p.perfect.connect(on_perfect)
@@ -245,6 +295,13 @@ func _course_run(p: Player) -> void:
 		if r.hard_frame >= 0 and r.hard_speed < 0.0 and Engine.get_physics_frames() >= r.hard_frame + 20:
 			r.hard_speed = spd  # ハードランディングの約0.3秒後の速度
 		seen[p.state] = true
+		# M2ゲート「全技が速度を落とさずにつながる」：走り出した後、地上で走り速度の90%を下回っていた時間
+		if spd >= mp.run_speed * 0.95:
+			r.running = true
+		if r.running and p.state == Player.State.GROUND and spd < mp.run_speed * 0.9:
+			r.stall += 1
+			if OS.get_environment("SMOKE_TRACE") != "":
+				print("  stall z=%.2f y=%.2f spd=%.2f" % [pos.z, pos.y, spd])
 		r.min_y = minf(r.min_y, pos.y)
 		r.max_y = maxf(r.max_y, pos.y)
 		if seen.has(Player.State.WALL_CLIMB):
@@ -267,6 +324,10 @@ func _course_run(p: Player) -> void:
 			if p.state == Player.State.AIR:
 				peak_y = pos.y
 				crouched_this_fall = false
+			if p.state == Player.State.WALL_RUN:
+				r.wallrun_in = spd
+			if prev_state == Player.State.WALL_RUN and r.wallrun_out < 0.0:
+				r.wallrun_out = spd
 			prev_state = p.state
 		if p.state == Player.State.VAULT and p.move != null:
 			was_onto = p.move.onto
@@ -324,6 +385,8 @@ func _course_run(p: Player) -> void:
 	_check_true("vertical wall run", seen.has(Player.State.WALL_CLIMB))
 	_check_true("on top of the 4 m wall after vertical wall run (max y %.2f)" % r.top_after_wall_climb, r.top_after_wall_climb > 3.95)
 	_check_true("no wall crash on the clean line (got %d)" % r.crash, r.crash == 0)
+	_check_true("wall run keeps speed (%.2f -> %.2f m/s)" % [r.wallrun_in, r.wallrun_out], r.wallrun_out >= r.wallrun_in * 0.95)
+	_check_true("M2 gate: moves chain without slowing down (%.2f s below 90%% run speed)" % (r.stall / 60.0), r.stall / 60.0 <= 0.3)
 	_check_true("reached goal, timer shown: %s" % (label.text.replace("\n", " ") if label != null else "-"), label != null and label.text != "")
 
 

@@ -50,6 +50,13 @@ func _ready() -> void:
 	_label.text = ""
 	_ghost.visible = false
 	_ghost.top_level = true
+	_bind_player.call_deferred()
+
+
+func _bind_player() -> void:
+	_player = get_tree().get_first_node_in_group(&"player") as Player
+	if _player != null:
+		_player.respawned.connect(_on_respawned)
 
 
 func _process(delta: float) -> void:
@@ -60,10 +67,6 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if Input.is_action_just_pressed(&"retry"):
-		running = false
-		_ghost.visible = false
-		return
 	if not running:
 		return
 	elapsed += delta
@@ -72,6 +75,13 @@ func _physics_process(delta: float) -> void:
 		_rec_pos.append(_player.global_position)
 		_rec_yaw.append(_player.rig.yaw)
 	_update_ghost()
+
+
+## スタートへ戻ったら計り直し（スタート範囲を出た瞬間にまた始まる）。チェックポイントへ戻った時は計測を続ける
+func _on_respawned(to_start: bool) -> void:
+	if to_start:
+		running = false
+		_ghost.visible = false
 
 
 func _on_start_exited(body: Node3D) -> void:

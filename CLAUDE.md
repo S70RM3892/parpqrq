@@ -24,12 +24,14 @@
 - `scripts/ui/flow_hud.gd` + `shaders/flow_edge.gdshader` — 勢い値（画面の縁の光）とPerfect表示・スロー
 - `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義）、`course_timer.gd` — 計測・区間タイム・メダル・ゴースト、`checkpoint.gd` — 落下時の戻り先
 - `tools/build_body.gd` — `assets/source/*.glb` から体のメッシュを作り直す（`godot --headless --path . -s tools/build_body.gd`）
+- `tools/capture.tscn` — 画面を撮って見た目を確認する（`xvfb-run -a godot --path . res://tools/capture.tscn -- --scene=<tscn> --out=<path> --at=1.0,3.0 --forward`）
 
 ## 作業ルール
 - 変更のたびに Godot MCP（`.mcp.json`）で実行し、出力のエラーを読んで自分で直す。
 - コミット前にスモークテストを通す: `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`（終了コード0で合格）。コースを自動で走り、全技が仕様どおり出るかを見る
 - 手触りの数値（ジャンプの高さ、カメラ演出の強さなど `MovementParams` と演出の値）は勝手に変えない。持ち主が走りながら決める。
-- 入力は InputMap のアクション名で扱う（キー・ボタンを直接読まない）。
+- 入力は InputMap のアクション名で扱う（キー・ボタンを直接読まない）。player.gd では `_just()` / `_held()` / `_move_input()` を通す（`input_enabled` で止められるように）。
+- リトライ・落下で戻ったことは `Player.respawned(to_start)` で受け取る。入力を別の場所で読み直さない。
 - スモークテストは記録を `smoke_test` のIDで取る（持ち主の自己ベストとゴーストを上書きしない）。
 
 ## GDScriptの落とし穴（このプロジェクトで踏んだもの）

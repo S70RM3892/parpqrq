@@ -8,20 +8,26 @@ const GLOW_MAX := 0.22      ## 勢い100%でも「うっすら」
 const FLASH := 0.45
 const FLASH_DECAY := 3.0      ## /s
 const LABEL_TIME := 0.6       ## s
+const BLINK_TIME := 0.15      ## s。戻った瞬間に白から戻す（瞬間移動を目立たせない。読み込み画面ではない）
+const HOLD_WHITE := 0.35      ## リトライ長押しの溜め：チェックポイントへ戻る直前の白さ
 
 @export var player: Player
 
 var _flash: float = 0.0
 var _label_t: float = 0.0
+var _blink: float = 0.0
 
 @onready var _edge: ColorRect = $Edge
 @onready var _label: Label = $Perfect
+@onready var _white: ColorRect = $Blink
 
 
 func _ready() -> void:
 	layer = 50
 	_label.modulate.a = 0.0
+	_white.visible = false
 	player.perfect.connect(_on_perfect)
+	player.respawned.connect(func(_to_start: bool) -> void: _blink = BLINK_TIME)
 
 
 func _process(delta: float) -> void:
@@ -33,6 +39,12 @@ func _process(delta: float) -> void:
 	if _label_t > 0.0:
 		_label_t -= real
 		_label.modulate.a = clampf(_label_t / LABEL_TIME * 2.0, 0.0, 1.0)
+	# リトライ：長押しの間だけ白くなっていき、戻った瞬間は白から素早く戻る
+	_blink = maxf(_blink - real, 0.0)
+	var hold := clampf(player.retry_hold / Player.RETRY_HOLD, 0.0, 1.0) * HOLD_WHITE
+	var white := maxf(_blink / BLINK_TIME, hold)
+	_white.visible = white > 0.0
+	_white.color.a = white
 
 
 func _on_perfect(_kind: StringName) -> void:
