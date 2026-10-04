@@ -49,6 +49,8 @@ func _ready() -> void:
 	geo.build()
 	add_child(geo)
 	lightmap_ok = LevelLighting.apply(geo, course_id)
+	if bool(area.get("lit", false)):
+		_spawn_lights(geo.lights, LevelStyle.night_amount_for(area.time))
 	var grabs := GrabLines.new()
 	grabs.name = "GrabLines"
 	grabs.lines = builder.grab_lines
@@ -101,6 +103,44 @@ func _ready() -> void:
 	build_ms = Time.get_ticks_msec() - t0
 	print("course %s: %d primitives, %d backdrop buildings, route %.0f m, built in %d ms" % [
 			course_id, geo.primitive_count, backdrop.building_count, builder.route_len, build_ms])
+
+
+## 街灯・ネオン・看板の灯り（夕方・夜）。Mobile レンダラーは1つのメッシュに灯り8つまでなので、
+## LevelGeometry の区画（40 m）ごとに MAX_LIGHTS_PER_CHUNK までに抑える。影は落とさない（重い）
+const MAX_LIGHTS_PER_CHUNK := 5
+
+
+func _spawn_lights(list: Array[Dictionary], night_k: float) -> void:
+	var per_chunk: Dictionary[Vector2i, int] = {}
+	var k := lerpf(0.45, 1.0, clampf((night_k - 0.3) / 0.7, 0.0, 1.0))
+	for l: Dictionary in list:
+		var pos: Vector3 = l.pos
+		var c := Vector2i(floori(pos.x / LevelGeometry.CHUNK), floori(pos.z / LevelGeometry.CHUNK))
+		if per_chunk.get(c, 0) >= MAX_LIGHTS_PER_CHUNK:
+			continue
+		per_chunk[c] = per_chunk.get(c, 0) + 1
+		var light: Light3D
+		if l.down:
+			var sp := SpotLight3D.new()
+			sp.spot_range = l.range
+			sp.spot_angle = 58.0
+			sp.spot_attenuation = 0.8
+			sp.rotation_degrees = Vector3(-90, 0, 0)
+			light = sp
+		else:
+			var om := OmniLight3D.new()
+			om.omni_range = l.range
+			om.omni_attenuation = 1.4
+			light = om
+		light.position = pos
+		light.light_color = l.color
+		light.light_energy = float(l.energy) * k
+		light.light_specular = 0.6
+		light.shadow_enabled = false
+		light.distance_fade_enabled = true
+		light.distance_fade_begin = 70.0
+		light.distance_fade_length = 20.0
+		add_child(light)
 
 
 ## フリーラン：屋上に立っている間、落ちた時の戻り先をそこにする

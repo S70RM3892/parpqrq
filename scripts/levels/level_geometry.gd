@@ -79,6 +79,9 @@ var lightmap_size: Vector2i = Vector2i.ZERO
 var lightmap_hash: String = ""
 ## 焼く道具だけが true にする（build() の後も面の一覧を残して write_bake_input に使う）
 var keep_bake_data: bool = false
+## 灯り（街灯・ネオン・看板）。Course が夕方・夜に OmniLight3D / SpotLight3D にする。
+## {pos: Vector3, color: Color, energy: float, range: float, down: bool（true = 真下へのスポット）}
+var lights: Array[Dictionary] = []
 
 
 func _init() -> void:
@@ -133,6 +136,11 @@ func add_beam(a: Vector3, b: Vector3, radius: float, mat: int, flags: int = NO_C
 		shape.height = length
 		_collider(xf, shape, LevelStyle.SURFACE[mat])
 	primitive_count += 1
+
+
+## 灯りを1つ足す（見た目の発光する箱とは別に、周りを照らす光）
+func add_light(pos: Vector3, color: Color, energy: float, light_range: float, down: bool = false) -> void:
+	lights.append({"pos": pos, "color": color, "energy": energy, "range": light_range, "down": down})
 
 
 ## 積んだものをメッシュにして置く
@@ -330,18 +338,22 @@ func _box_mesh(xf: Transform3D, size: Vector3, mat: int, flags: int, tint: Color
 	var rnd := _rng.randf()
 	var bake := _bakes(mat, flags)
 	var d_top := LM_DENSITY if bake else 0.0
+	# 箱が重なった所で同じ平面の面がちらつかない（Zファイティング）ように、箱ごとに見た目だけ少しずらす：
+	# 側面は数mm内側へ、上面は数mm下へ（当たり判定はそのまま。上面は大きさを保つので床に隙間はできない）
+	var top_y := e.y - fposmod(rnd * 3.7, 1.0) * 0.004
+	var es := Vector3(maxf(e.x - 0.002 - fposmod(rnd * 7.13, 1.0) * 0.008, e.x * 0.9), e.y, maxf(e.z - 0.002 - fposmod(rnd * 5.31, 1.0) * 0.008, e.z * 0.9))
 	# 上面（u = x, v = z）
-	_face(s, xf, b * Vector3.UP, [Vector3(-e.x, e.y, e.z), Vector3(e.x, e.y, e.z), Vector3(e.x, e.y, -e.z), Vector3(-e.x, e.y, -e.z)],
+	_face(s, xf, b * Vector3.UP, [Vector3(-e.x, top_y, e.z), Vector3(e.x, top_y, e.z), Vector3(e.x, top_y, -e.z), Vector3(-e.x, top_y, -e.z)],
 			Vector2(size.x, size.z), tint, [size.y, size.y, size.y, size.y], 1.0, rnd, mat, flags, d_top)
 	# 下面
 	_face(s, xf, b * Vector3.DOWN, [Vector3(-e.x, -e.y, -e.z), Vector3(e.x, -e.y, -e.z), Vector3(e.x, -e.y, e.z), Vector3(-e.x, -e.y, e.z)],
 			Vector2(size.x, size.z), tint, [0.0, 0.0, 0.0, 0.0], 2.0, rnd, mat, flags, d_top)
 	# 側面（u = 横、v = 下0→上1）。高いビルの壁は、屋上から LM_BAND までを細かく、それより下を粗く焼くため上下に分ける
 	var sides: Array = [
-		[Vector3.BACK, [Vector3(-e.x, -e.y, e.z), Vector3(e.x, -e.y, e.z), Vector3(e.x, e.y, e.z), Vector3(-e.x, e.y, e.z)], size.x],
-		[Vector3.FORWARD, [Vector3(e.x, -e.y, -e.z), Vector3(-e.x, -e.y, -e.z), Vector3(-e.x, e.y, -e.z), Vector3(e.x, e.y, -e.z)], size.x],
-		[Vector3.RIGHT, [Vector3(e.x, -e.y, e.z), Vector3(e.x, -e.y, -e.z), Vector3(e.x, e.y, -e.z), Vector3(e.x, e.y, e.z)], size.z],
-		[Vector3.LEFT, [Vector3(-e.x, -e.y, -e.z), Vector3(-e.x, -e.y, e.z), Vector3(-e.x, e.y, e.z), Vector3(-e.x, e.y, -e.z)], size.z],
+		[Vector3.BACK, [Vector3(-es.x, -e.y, es.z), Vector3(es.x, -e.y, es.z), Vector3(es.x, top_y, es.z), Vector3(-es.x, top_y, es.z)], size.x],
+		[Vector3.FORWARD, [Vector3(es.x, -e.y, -es.z), Vector3(-es.x, -e.y, -es.z), Vector3(-es.x, top_y, -es.z), Vector3(es.x, top_y, -es.z)], size.x],
+		[Vector3.RIGHT, [Vector3(es.x, -e.y, es.z), Vector3(es.x, -e.y, -es.z), Vector3(es.x, top_y, -es.z), Vector3(es.x, top_y, es.z)], size.z],
+		[Vector3.LEFT, [Vector3(-es.x, -e.y, -es.z), Vector3(-es.x, -e.y, es.z), Vector3(-es.x, top_y, es.z), Vector3(-es.x, top_y, -es.z)], size.z],
 	]
 	var split := bake and size.y > LM_BAND + 3.0
 	var k := (size.y - LM_BAND) / size.y if split else 0.0

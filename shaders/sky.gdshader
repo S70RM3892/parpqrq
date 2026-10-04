@@ -35,9 +35,15 @@ void sky() {
 	if (!AT_CUBEMAP_PASS) {
 		c += sun_color * smoothstep(sun_size, sun_size + 0.0003, sd) * 6.0;
 		if (stars > 0.0 && y > 0.0) {
-			vec3 g = floor(d * 220.0);
+			// 星：細かい格子の中の丸い点（四角く見せない）。明るさと色温度をばらつかせる
+			vec3 sd3 = d * 520.0;
+			vec3 g = floor(sd3);
 			float h = hash13(g);
-			c += vec3(0.85, 0.9, 1.0) * step(0.9978, h) * stars * smoothstep(0.02, 0.3, y) * (0.4 + 0.6 * hash13(g + 3.0));
+			vec3 off = vec3(hash13(g + 7.0), hash13(g + 13.0), hash13(g + 29.0));
+			float r = length(fract(sd3) - off);
+			float dotk = 1.0 - smoothstep(0.08, 0.3, r);
+			vec3 tint = mix(vec3(1.0, 0.85, 0.7), vec3(0.75, 0.85, 1.0), hash13(g + 3.0));
+			c += tint * step(0.994, h) * dotk * stars * smoothstep(0.03, 0.35, y) * (0.5 + 1.5 * hash13(g + 5.0));
 		}
 	}
 	COLOR = c;

@@ -63,6 +63,8 @@ func _ready() -> void:
 func apply() -> void:
 	Engine.max_fps = max_fps
 	get_viewport().scaling_3d_scale = clampf(render_scale, 0.7, 1.0)
+	# 画質「高」は MSAA 4x（電線・手すり・縁のギザギザを消す。タイル型のモバイルGPUでは安い）
+	get_viewport().msaa_3d = Viewport.MSAA_4X if graphics_quality >= 1 else Viewport.MSAA_DISABLED
 	LevelStyle.set_route_visible(route_color)
 	_set_bus_volume(&"Master", volume_master)
 	_set_bus_volume(&"Music", volume_music)

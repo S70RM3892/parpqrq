@@ -877,11 +877,11 @@ func _decorate() -> void:
 				if not _is_clear(p, room * 0.5 + 0.8):
 					f += 2.0  # 近道の通り道には置かない
 					continue
-				f += _prop(kind, facing, along, room, usable - f) + rng.randf_range(2.0, 5.0)
+				f += _prop(kind, facing, along, room, usable - f, side) + rng.randf_range(2.0, 5.0)
 
 
 ## 小物を1つ置く。戻り値 = 使った奥行き（ルート方向）
-func _prop(kind: String, xf: Transform3D, along: Transform3D, room: float, left: float) -> float:
+func _prop(kind: String, xf: Transform3D, along: Transform3D, room: float, left: float, side: float = 1.0) -> float:
 	match kind:
 		"ac":
 			var n := rng.randi_range(1, 3)
@@ -914,7 +914,8 @@ func _prop(kind: String, xf: Transform3D, along: Transform3D, room: float, left:
 				return 2.4
 		"billboard":
 			var colors: Array = theme.get("sign_colors", [Color(0.3, 0.6, 0.9)])
-			CourseProps.billboard(geo, xf * Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, room * 0.3)),
+			# 発光面（-Z）を道へ向け、さらに走ってくる人のほうへ35°振る（真横だと走りながら見えない）
+			CourseProps.billboard(geo, xf * Transform3D(Basis(Vector3.UP, deg_to_rad(35.0 * side)), Vector3(0, 0, room * 0.3)),
 					rng.randf_range(3.0, 5.0), rng.randf_range(1.6, 2.6), colors[rng.randi() % colors.size()], bool(theme.get("lit", false)))
 			return 4.0
 		"neon":

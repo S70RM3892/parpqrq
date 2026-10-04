@@ -50,8 +50,49 @@ static func material(mat: int) -> ShaderMaterial:
 			_configure(m, 5, Color(0.86, 0.86, 0.84), 0.85, 0.0)
 		Mat.HAZARD:
 			_configure(m, 8, Color(0.98, 0.78, 0.12), 0.6, 0.0)
+	# 写真のテクスチャ（CC0、assets/textures/CREDITS.md）：明るさのムラ・粗さ・凹み・法線だけを足す。色は上の albedo のまま
+	match mat:
+		Mat.WHITE:
+			_textures(m, "concrete", 2.0, 0.45, 0.55, "plaster", 1.6, 0.35)
+			m.set_shader_parameter(&"grime", 0.6)
+		Mat.BUILDING:
+			_textures(m, "concrete", 2.0, 0.45, 0.55, "plaster", 1.6, 0.4)
+			m.set_shader_parameter(&"grime", 1.0)
+			m.set_shader_parameter(&"bevel_m", 0.05)
+		Mat.ROUTE:
+			_textures(m, "concrete_dirty", 2.0, 0.45, 0.4, "concrete_dirty", 2.0, 0.45)
+			m.set_shader_parameter(&"grime", 0.7)
+		Mat.METAL:
+			_textures(m, "metal", 1.0, 0.5, 0.8, "corrugated", 2.0, 0.45)
+		Mat.GRAVEL:
+			_textures(m, "gravel", 2.1, 0.85, 1.0)
+			m.set_shader_parameter(&"bevel_m", 0.0)
+		Mat.DARK:
+			_textures(m, "concrete_dirty", 2.0, 0.5, 0.5, "shutter", 1.2, 0.4)
+		Mat.ACCENT:
+			_textures(m, "shutter", 1.2, 0.35, 0.4, "shutter", 1.2, 0.35)
+		Mat.HAZARD:
+			_textures(m, "shutter", 1.2, 0.3, 0.4, "shutter", 1.2, 0.3)
+		Mat.GLASS:
+			m.set_shader_parameter(&"bevel_m", 0.015)
 	_cache[mat] = m
 	return m
+
+
+## 写真のテクスチャを材質に付ける（上面用と、あれば側面用）。tile = 1枚の実寸 m、strength = 明るさのムラ、nrm = 法線の強さ
+static func _textures(m: ShaderMaterial, top: String, tile: float, strength: float, nrm: float,
+		side: String = "", side_tile: float = 2.0, side_strength: float = 0.0) -> void:
+	m.set_shader_parameter(&"detail_tex", load("res://assets/textures/%s_detail.png" % top))
+	m.set_shader_parameter(&"normal_tex", load("res://assets/textures/%s_normal.png" % top))
+	m.set_shader_parameter(&"tile_m", tile)
+	m.set_shader_parameter(&"detail_strength", strength)
+	m.set_shader_parameter(&"normal_strength", nrm)
+	m.set_shader_parameter(&"tex_rough", 1.0)
+	if side != "":
+		m.set_shader_parameter(&"side_detail_tex", load("res://assets/textures/%s_detail.png" % side))
+		m.set_shader_parameter(&"side_normal_tex", load("res://assets/textures/%s_normal.png" % side))
+		m.set_shader_parameter(&"side_tile_m", side_tile)
+		m.set_shader_parameter(&"side_detail_strength", side_strength)
 
 
 ## エリアの差し色（屋内は1エリア1色：仕様書 6章）
@@ -62,6 +103,12 @@ static func set_accent(c: Color) -> void:
 ## ルートカラーのON/OFF（上級者向け設定）と夜の度合いは全材質で共通（グローバルなシェーダー変数）
 static func set_route_visible(on: bool) -> void:
 	RenderingServer.global_shader_parameter_set(&"route_strength", 1.0 if on else 0.0)
+
+
+## 時間帯の夜の度合い（Atmosphere.PRESETS の night）
+static func night_amount_for(time: StringName) -> float:
+	var p: Dictionary = Atmosphere.PRESETS.get(time, {})
+	return float(p.get("night", 0.0))
 
 
 static func set_night(amount: float) -> void:

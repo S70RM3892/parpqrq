@@ -31,9 +31,9 @@ const PRESETS: Dictionary[StringName, Dictionary] = {
 	},
 	&"night": {
 		"top": Color(0.015, 0.02, 0.06), "horizon": Color(0.13, 0.12, 0.24), "ground": Color(0.04, 0.04, 0.07),
-		"sun": Color(0.6, 0.7, 1.0), "sun_energy": 0.45, "elevation": 38.0, "azimuth": 140.0,
-		"ambient": 1.1, "fog": Color(0.1, 0.1, 0.19), "fog_end": 220.0, "fog_max": 0.95,
-		"exposure": 1.25, "contrast": 1.05, "saturation": 1.1, "night": 1.0, "stars": 1.0,
+		"sun": Color(0.6, 0.7, 1.0), "sun_energy": 0.35, "elevation": 38.0, "azimuth": 140.0,
+		"ambient": 0.62, "fog": Color(0.1, 0.1, 0.19), "fog_end": 220.0, "fog_max": 0.95,
+		"exposure": 1.2, "contrast": 1.05, "saturation": 1.1, "night": 1.0, "stars": 1.0,
 		"cloud": Color(0.2, 0.2, 0.32, 0.6), "cloud_shade": Color(0.1, 0.1, 0.16), "coverage": 0.56,
 	},
 }
@@ -66,7 +66,10 @@ func _ready() -> void:
 	# 影が空の青に染まりすぎないよう、空の寄与を少し落として中間色を混ぜる
 	environment.ambient_light_sky_contribution = 0.7
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
+	# AgX：明るい白が飛ばずに色味を保つ（白い街の日向が真っ白に潰れない）
+	environment.tonemap_agx_white = 10.0
+	environment.tonemap_agx_contrast = 1.35
 	environment.adjustment_enabled = true
 	environment.fog_enabled = true
 	environment.fog_mode = Environment.FOG_MODE_DEPTH
@@ -83,8 +86,8 @@ func _ready() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_blend_splits = false
-	sun.shadow_bias = 0.04
-	sun.shadow_normal_bias = 1.2
+	sun.shadow_bias = 0.05
+	sun.shadow_normal_bias = 1.8  # 低い朝日で広い床に斜めの縞（シャドウアクネ）が出ないように
 	add_child(sun)
 
 	_clouds = MeshInstance3D.new()
@@ -93,8 +96,8 @@ func _ready() -> void:
 	dome.radius = 330.0
 	dome.height = 330.0
 	dome.is_hemisphere = true
-	dome.radial_segments = 24
-	dome.rings = 8
+	dome.radial_segments = 64
+	dome.rings = 32  # 粗いと地平線の少し上に輪の継ぎ目が見える
 	_clouds.mesh = dome
 	_clouds.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_clouds.top_level = true

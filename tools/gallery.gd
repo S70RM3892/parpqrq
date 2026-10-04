@@ -80,10 +80,14 @@ func _shoot_course() -> void:
 		if not await _run_until(bot, func() -> bool: return _frame >= roundi(target * 60.0)):
 			break
 		if not is_nan(_look_pitch):
-			p.rig.set_look(p.rig.yaw, deg_to_rad(_look_pitch))
-			await get_tree().process_frame
+			# 自動走行は毎フレーム視線を水平に戻すので、撮る間だけ止める
+			bot.set_physics_process(false)
+			for i: int in 4:
+				p.rig.set_look(p.rig.yaw, deg_to_rad(_look_pitch))
+				await get_tree().process_frame
 		await _capture(n, "t=%.1fs state %s speed %.1f m/s pos %s" % [_frame / 60.0, Player.State.keys()[p.state],
 				p.horizontal_speed(), p.global_position.snapped(Vector3.ONE * 0.1)])
+		bot.set_physics_process(true)
 		n += 1
 	if _results and course.timer != null:
 		_render(false)
