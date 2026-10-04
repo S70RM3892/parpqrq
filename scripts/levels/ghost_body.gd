@@ -8,6 +8,8 @@ const FAR := 22.0
 
 var far_arrow: bool = true
 var color: Color = Color(1.0, 0.416, 0.102, 0.38)
+## true = 影だけを落とす人形（1人称の自分の影。カメラには写らない）
+var shadow_only: bool = false
 
 var _phase: float = 0.0
 var _state: int = 0
@@ -19,9 +21,10 @@ var _body: Node3D
 
 func _ready() -> void:
 	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = color
+	if not shadow_only:
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = color
 	_body = Node3D.new()
 	add_child(_body)
 	var hips := _pivot(&"hips", _body, Vector3(0, 0.95, 0))
@@ -38,6 +41,11 @@ func _ready() -> void:
 		_part(hip, CapsuleMesh, Vector3(0, -0.22, 0), Vector3(0.14, 0.46, 0.14), mat)
 		var knee := _pivot(StringName("shin_" + key), hip, Vector3(0, -0.44, 0))
 		_part(knee, CapsuleMesh, Vector3(0, -0.22, 0), Vector3(0.12, 0.46, 0.12), mat)
+	if shadow_only:
+		far_arrow = false
+		for mi: Node in _body.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		return
 	# 遠い時の矢印（壁越しにも見える）
 	var amat := mat.duplicate() as StandardMaterial3D
 	amat.no_depth_test = true

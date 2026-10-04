@@ -15,6 +15,8 @@ var _land: CPUParticles3D
 var _slide: CPUParticles3D
 var _sparks: CPUParticles3D
 var _wall: CPUParticles3D
+## 自分の影（影だけを落とす人形。1人称でも地面に体の影が落ちる）
+var _shadow: GhostBody
 static var _dust_tex: Texture2D
 
 
@@ -55,6 +57,9 @@ func _ready() -> void:
 	_wall.initial_velocity_min = 0.4
 	_wall.initial_velocity_max = 1.2
 	_wall.gravity = Vector3(0, -2.0, 0)
+	_shadow = GhostBody.new()
+	_shadow.shadow_only = true
+	add_child(_shadow)
 	player.landed.connect(func(_impact: float, drop: float) -> void:
 		if drop > 0.6:
 			_burst(clampf(drop / 4.0, 0.35, 1.0)))
@@ -129,10 +134,12 @@ func _burst(strength: float) -> void:
 	_land.restart()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if player == null:
 		return
 	var feet := player.get_global_transform_interpolated().origin
+	_shadow.visible = player.visible
+	_shadow.show_frame({"pos": feet, "yaw": player.rig.yaw, "state": player.state, "speed": player.horizontal_speed()}, delta)
 	var vel := Vector3(player.velocity.x, 0.0, player.velocity.z)
 	var back := -vel.normalized() if vel.length() > 0.5 else Vector3.BACK
 	var sliding := player.state == Player.State.SLIDE
