@@ -116,6 +116,15 @@ func _run() -> void:
 	await _frames(10)
 	course = get_tree().current_scene as Course
 	_check("free run loads without a timer", course != null and course.free_run and course.timer == null and course.player.is_on_floor())
+	# フリーランの一時停止 → リトライ（計測が無くても動く）
+	course.player.global_position += Vector3(3, 0, 3)
+	await _press(&"pause")
+	await _frames(3)
+	var retry := get_viewport().gui_get_focus_owner() as Button
+	_check("free run: pause opens with Retry focused", course.pause_menu.is_open() and retry != null and retry.text == "Retry")
+	await _press(&"ui_accept")
+	await _frames(3)
+	_check("free run: retry returns to the start", not course.pause_menu.is_open() and course.player.global_position.distance_to(course.builder.start_xf.origin) < 0.5)
 
 
 func _shot(shot_name: String) -> void:

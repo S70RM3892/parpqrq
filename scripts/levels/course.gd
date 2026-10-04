@@ -155,4 +155,5 @@ func _set_player_active(on: bool) -> void:
 	player.visible = on
 	(player.get_node("FlowHUD") as CanvasLayer).visible = on
 	(player.get_node("Body") as Node3D).visible = on and Settings.feel_body
-	timer.set_physics_process(on)
+	if timer != null:
+		timer.set_physics_process(on)
