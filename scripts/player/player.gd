@@ -434,8 +434,9 @@ func _start_roll(drop: float) -> void:
 func _start_hard_land(drop: float) -> void:
 	var h := Vector3(velocity.x, 0.0, velocity.z) * (1.0 - params.hard_land_speed_loss)
 	velocity = Vector3(h.x, 0.0, h.z)
-	_set_state(State.HARD_LAND)
-	hard_landed.emit(drop)
+	hard_landed.emit(drop)  # 揺れ・振動は常に出す
+	if params.hard_land_stun > 0.0:
+		_set_state(State.HARD_LAND)
 
 
 func _try_vault() -> bool:

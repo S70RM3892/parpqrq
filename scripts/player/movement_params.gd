@@ -68,8 +68,8 @@ extends Resource
 @export_range(0.0, 0.2, 0.01) var roll_window_after: float = 0.08
 @export_range(0.2, 1.2, 0.01) var roll_duration: float = 0.55
 @export_range(2.0, 10.0, 0.1) var hard_land_drop: float = 4.0   ## m
-@export_range(0.1, 1.5, 0.05) var hard_land_stun: float = 0.6   ## s
-@export_range(0.0, 1.0, 0.05) var hard_land_speed_loss: float = 0.7
+@export_range(0.0, 1.5, 0.05) var hard_land_stun: float = 0.0   ## s。0.3.0-beta の試走で「止まるのが不快」となり0（仕様書は0.6）
+@export_range(0.0, 1.0, 0.05) var hard_land_speed_loss: float = 0.0 ## 同上で0（仕様書は0.7）。揺れと振動だけ残す
 
 @export_group("足取り")
 @export_range(0.5, 4.0, 0.1) var cadence_walk: float = 2.0      ## 歩/s

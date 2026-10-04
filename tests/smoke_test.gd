@@ -201,8 +201,12 @@ func _course_run(p: Player) -> void:
 	await _frames(10)
 	var r := {
 		"vaults": 0, "onto_y": -1.0, "vault_speeds": [], "rolled": false, "roll_end_speed": -1.0,
-		"crash": 0, "min_y": 0.0, "max_y": 0.0, "top_after_wall_climb": 0.0,
+		"crash": 0, "min_y": 0.0, "max_y": 0.0, "top_after_wall_climb": 0.0, "hard": 0, "hard_speed": -1.0, "hard_frame": -1,
 	}
+	var on_hard := func(_d: float) -> void:
+		r.hard += 1
+		r.hard_frame = Engine.get_physics_frames()
+	p.hard_landed.connect(on_hard)
 	var seen: Dictionary[Player.State, bool] = {}
 	var on_crash := func(spd: float) -> void:
 		r.crash += 1
@@ -226,6 +230,8 @@ func _course_run(p: Player) -> void:
 			print("  T z=%.2f x=%.2f y=%.2f st=%d vy=%.2f spd=%.2f" % [pos.z, pos.x, pos.y, p.state, p.velocity.y, spd])
 		var dir := Vector3(p.velocity.x, 0.0, p.velocity.z).normalized() if spd > 1.0 else Vector3.FORWARD
 		cooldown -= 1.0 / 60.0
+		if r.hard_frame >= 0 and r.hard_speed < 0.0 and Engine.get_physics_frames() >= r.hard_frame + 20:
+			r.hard_speed = spd  # ハードランディングの約0.3秒後の速度
 		seen[p.state] = true
 		r.min_y = minf(r.min_y, pos.y)
 		r.max_y = maxf(r.max_y, pos.y)
@@ -281,6 +287,7 @@ func _course_run(p: Player) -> void:
 	Input.action_release(&"move_forward")
 	Input.action_release(&"jump")
 	p.crashed.disconnect(on_crash)
+	p.hard_landed.disconnect(on_hard)
 
 	var keep := mp.run_speed * mp.vault_speed_keep
 	_check_true("vaults done: %d (want 4: 1.0 m, 0.8 m, onto box, 1.2 m)" % r.vaults, r.vaults >= 4)
@@ -290,7 +297,8 @@ func _course_run(p: Player) -> void:
 	_check_true("stairs climbed to the 4.8 m tower (max y %.2f)" % r.max_y, r.max_y > 4.75)
 	_check_true("rolled after a big drop", r.rolled)
 	_check_near("roll keeps speed", r.roll_end_speed, mp.run_speed, mp.run_speed * 0.08)
-	_check_true("hard landing after 4.8 m drop without roll", seen.has(Player.State.HARD_LAND))
+	_check_true("hard landing feedback after 4.8 m drop without roll (%d)" % r.hard, r.hard >= 1)
+	_check_near("hard landing does not stop the run (speed after)", r.hard_speed, mp.run_speed * (1.0 - mp.hard_land_speed_loss), 0.5)
 	_check_true("slide under the bar", seen.has(Player.State.SLIDE))
 	_check_true("wall run over the pit", seen.has(Player.State.WALL_RUN))
 	_check_true("never fell into the pit (min y %.2f)" % r.min_y, r.min_y > -1.0)

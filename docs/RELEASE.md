@@ -1,5 +1,10 @@
 # リリース手順（Android APK）
 
+## 0.4.0-beta
+
+- versionCode 4 / versionName `0.4.0-beta`、同じ鍵で署名
+- 高所から落ちた時の硬直と減速を廃止（揺れ・振動・着地の沈み込みは残す）
+
 ## 0.3.0-beta
 
 - versionCode 3 / versionName `0.3.0-beta`、同じ鍵で署名（上書き更新できる）
