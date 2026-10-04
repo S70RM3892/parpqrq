@@ -31,6 +31,10 @@
 - `tools/build_audio.gd` — 効果音とBGMを合成して `assets/audio/` に書き出す（`godot --headless --path . -s tools/build_audio.gd`）、`tools/print_course.gd` — コースのレシピと道しるべを表示
 - `tools/build_body.gd` — `assets/source/*.glb` から体のメッシュを作り直す（`godot --headless --path . -s tools/build_body.gd`）
 - `tools/capture.tscn` — 画面を撮って見た目を確認する（`xvfb-run -a godot --path . res://tools/capture.tscn -- --scene=<tscn> --out=<path> --at=1.0,3.0 --forward`）
+- `tools/gallery.sh` / `tools/gallery.tscn` — 試験官（`.claude/agents/aaa-examiner.md`、報告は `docs/exams/`）に見せる画面一式を自動走行で撮る。AAA化の記録は docs/M6.md
+- 焼いた光：`tools/lightbaker/lightbaker.cpp`（C++ の経路追跡）を `tools/bake_lighting.tscn` が全コースに回して `assets/lightmaps/` に書く。`LevelGeometry` が面をアトラスに割り当て、`LevelLighting` が読む。材質の写真は `tools/fetch_textures.py`（Poly Haven、CC0）
+- `shaders/level.gdshader` + `shaders/city.gdshaderinc` — 街の材質（テクスチャ・角の丸み・窓の奥の部屋・焼いた光）、`shaders/backdrop.gdshader` — 遠景のビルの外壁、`scripts/player/body/hand_model.gd` — 手続き的に作る機械の手、`scripts/player/player_fx.gd` — 足元の粒
+- 開発者のゴースト：`tools/record_dev_ghosts.tscn` が近道を全部通る自動走行を `assets/ghosts/` に記録する（ゴールドを取ると一緒に走る）
 
 ## 作業ルール
 - 変更のたびに Godot MCP（`.mcp.json`）で実行し、出力のエラーを読んで自分で直す。
@@ -38,6 +42,7 @@
   - スモークテスト `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn` — 白箱コースを自動で走り、全技が仕様どおり出るか
   - コーステスト `godot --headless --path . --fixed-fps 60 res://tests/course_test.tscn` — 全16コースを自動走行（`tests/autopilot.gd`）で、完璧な走りと人の模型（押す瞬間が4〜8フレーム遅れる）それぞれの主ルートだけ・近道を全部通る の4回走る。完璧な走りの近道はどれも0.25秒以上速く、発見の判定・近道の目印・チェックポイントの間隔（150 m以下、シルバーのペースで20秒以下）が合っているか。コースを変えたら出てきたメダルの目安5つ（開発者・エース・ゴールド・シルバー・ブロンズ）を、**全コースを走らせた**出力から `course_catalog.gd` に写す（式と表は docs/BALANCE.md。`--only` は数フレームずれる）
   - 画面の流れ `godot --headless --path . --fixed-fps 60 res://tests/flow_test.tscn` — タイトル→コース→結果→リプレイ→一時停止→コース選択→フリーラン
+- **コースの形を変えたら**（course_builder・course_props・course_catalog のレシピ）、光を焼き直し（`godot --headless --path . res://tools/bake_lighting.tscn`）、開発者のゴーストを記録し直す（`godot --headless --path . --fixed-fps 60 res://tools/record_dev_ghosts.tscn`）。古いとコーステストが落ちる
 - Godot MCP が動かない環境（ディスプレイなし）では `xvfb-run -a godot --path . --audio-driver Dummy --quit-after 240` で描画ありの実行をして出力を読む
 - 手触りの数値（ジャンプの高さ、カメラ演出の強さなど `MovementParams` と演出の値）は勝手に変えない。持ち主が走りながら決める。
 - 入力は InputMap のアクション名で扱う（キー・ボタンを直接読まない）。player.gd では `_just()` / `_held()` / `_move_input()` を通す（`input_enabled` で止められるように）。
