@@ -14,6 +14,7 @@
 [ext_resource type="Script" path="res://scripts/player/wind_streaks.gd" id="14_wind"]
 [ext_resource type="Script" path="res://scripts/player/player_audio.gd" id="15_audio"]
 [ext_resource type="Script" path="res://scripts/player/body/hand_model.gd" id="16_hand"]
+[ext_resource type="Script" path="res://scripts/player/player_fx.gd" id="17_fx"]
 
 [sub_resource type="ShaderMaterial" id="Mat_edge"]
 shader = ExtResource("13_edge")
@@ -161,3 +162,7 @@ theme_override_constants/outline_size = 10
 theme_override_font_sizes/font_size = 40
 text = "PERFECT"
 horizontal_alignment = 1
+
+[node name="FX" type="Node3D" parent="." node_paths=PackedStringArray("player")]
+script = ExtResource("17_fx")
+player = NodePath("..")
