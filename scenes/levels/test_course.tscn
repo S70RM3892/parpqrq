@@ -1,8 +1,9 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/levels/greybox.gd" id="1_grey"]
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="2_player"]
 [ext_resource type="Script" path="res://scripts/levels/course_timer.gd" id="3_timer"]
+[ext_resource type="Script" path="res://scripts/levels/checkpoint.gd" id="4_cp"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
 sky_top_color = Color(0.45, 0.65, 0.92, 1)
@@ -26,6 +27,9 @@ fog_depth_end = 160.0
 
 [sub_resource type="BoxShape3D" id="Box_start"]
 size = Vector3(6, 4, 8)
+
+[sub_resource type="BoxShape3D" id="Box_cp"]
+size = Vector3(12, 4, 2)
 
 [sub_resource type="BoxShape3D" id="Box_goal"]
 size = Vector3(10, 6, 6)
@@ -54,7 +58,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 8)
 shape = SubResource("Box_start")
 
 [node name="GoalArea" type="Area3D" parent="CourseTimer"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -73)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -126)
 
 [node name="Shape" type="CollisionShape3D" parent="CourseTimer/GoalArea"]
 shape = SubResource("Box_goal")
@@ -74,6 +78,14 @@ horizontal_alignment = 1
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 8
 theme_override_font_sizes/font_size = 48
+
+[node name="Checkpoint" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -79)
+script = ExtResource("4_cp")
+
+[node name="Shape" type="CollisionShape3D" parent="Checkpoint"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+shape = SubResource("Box_cp")
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 8)

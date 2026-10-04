@@ -1,6 +1,7 @@
 class_name Player
 extends CharacterBody3D
-## 1人称パルクールの動き（仕様書 3章）。M1：走り・ジャンプ・ヴォルト・ローリング・ハードランディング。
+## 1人称パルクールの動き（仕様書 3章）。
+## 走り・ジャンプ・ヴォルト・クライム・レッジグラブ・ウォールラン（横/縦）・壁ジャンプ・スライド・ローリング・ハードランディング。
 ## 速度計算は全部自前で行い、move_and_slide() は衝突処理だけに使う。
 ## 演出（カメラ・体・振動）はここでは行わず、シグナルと公開している状態を各層が読む。
 
@@ -11,13 +12,22 @@ signal landed(impact: float, drop: float)
 signal rolled(drop: float)
 signal hard_landed(drop: float)
 signal vault_started
+signal climb_started
+signal ledge_grabbed
+signal wallrun_started
+signal wall_jumped
+signal slide_started
 ## 壁に正面からぶつかった。speed = 壁に向かっていた速度 m/s
 signal crashed(speed: float)
 
-enum State { GROUND, AIR, VAULT, ROLL, HARD_LAND }
+enum State { GROUND, AIR, VAULT, ROLL, HARD_LAND, CLIMB, LEDGE_HANG, WALL_RUN, WALL_CLIMB, SLIDE }
 
 const TUNED_PATH := "user://movement_tuned.tres"
-const CRASH_SPEED := 5.0  ## m/s。これより速く壁に当たると激突
+const CRASH_SPEED := 5.0      ## m/s。これより速く壁に当たると激突
+const STAND_HEIGHT := 1.8     ## m。立っている時の当たり判定
+const HANG_DROP := 1.9        ## m。ぶら下がり中、縁から足元まで
+const WALL_DETECT := 0.45     ## m。体の表面から壁までの検出距離
+const WALL_COOLDOWN := 0.35   ## s。離れた直後の同じ壁には張り付かない
 
 @export var params: MovementParams
 
@@ -26,10 +36,14 @@ var state_time: float = 0.0
 ## 足取りの位相。π進むごとに1歩
 var stride_phase: float = 0.0
 var prev_stride_phase: float = 0.0
-## ヴォルト中の情報（体の層が手を着く位置に使う）
-var vault: VaultProbe.Result
-var vault_progress: float = 0.0
+## ヴォルト・クライム・ぶら下がり中の地形（体の層が手を着く位置に使う）
+var move: VaultProbe.Result
+var move_progress: float = 0.0
+## ウォールラン中の壁（法線は壁から外向き）と側（+1=右, -1=左）
+var wall_normal: Vector3 = Vector3.ZERO
+var wall_side: float = 0.0
 var spawn: Transform3D
+var checkpoint: Transform3D
 
 var _since_floor: float = 0.0
 var _since_jump_press: float = INF
@@ -41,11 +55,15 @@ var _vy_before_move: float = 0.0
 ## 大きな落下の着地直後、ローリング入力を待つ時間（仕様：着地の0.2 s前〜直後）
 var _pending_drop: float = 0.0
 var _pending_time: float = -1.0
-var _vault_duration: float = 0.0
-var _vault_speed_in: float = 0.0
+var _move_duration: float = 0.0
+var _move_speed_in: float = 0.0
+var _last_wall_normal: Vector3 = Vector3.ZERO
+var _wall_cooldown: float = 0.0
+var _climb_rise_d: float = 0.0
 
 @onready var rig: CameraRig = $CameraRig
-@onready var _capsule: CapsuleShape3D = ($CollisionShape3D as CollisionShape3D).shape
+@onready var _shape_node: CollisionShape3D = $CollisionShape3D
+@onready var _capsule: CapsuleShape3D = _shape_node.shape
 
 
 func _ready() -> void:
@@ -56,21 +74,28 @@ func _ready() -> void:
 		if tuned != null:
 			params = tuned
 	spawn = global_transform
+	checkpoint = spawn
 	rig.player = self
 	footstep.connect(Haptics.step)
 	landed.connect(func(impact: float, _drop: float) -> void:
 		if impact > 3.0:
 			Haptics.land())
 	hard_landed.connect(func(_drop: float) -> void: Haptics.hard_land())
+	ledge_grabbed.connect(Haptics.grab)
+	climb_started.connect(Haptics.grab)
 	rig.snap(rotation.y)
 
 
 func _physics_process(delta: float) -> void:
-	if Input.is_action_just_pressed(&"retry") or global_position.y < -30.0:
+	if Input.is_action_just_pressed(&"retry"):
 		respawn()
+		return
+	if global_position.y < -30.0:
+		respawn(checkpoint)
 		return
 	_since_jump_press = 0.0 if Input.is_action_just_pressed(&"jump") else _since_jump_press + delta
 	_since_crouch_press = 0.0 if Input.is_action_just_pressed(&"crouch") else _since_crouch_press + delta
+	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
 	state_time += delta
 
 	match state:
@@ -84,7 +109,18 @@ func _physics_process(delta: float) -> void:
 			_roll(delta)
 		State.HARD_LAND:
 			_hard_land(delta)
+		State.CLIMB:
+			_climb(delta)
+		State.LEDGE_HANG:
+			_ledge_hang(delta)
+		State.WALL_RUN:
+			_wall_run(delta)
+		State.WALL_CLIMB:
+			_wall_climb(delta)
+		State.SLIDE:
+			_slide(delta)
 	_update_stride(delta)
+	_continuous_haptics()
 
 
 func horizontal_speed() -> float:
@@ -96,13 +132,16 @@ func stride_phase_interpolated() -> float:
 	return lerpf(prev_stride_phase, stride_phase, Engine.get_physics_interpolation_fraction())
 
 
-func respawn() -> void:
-	global_transform = spawn
+## 引数なし = スタート地点へ（リトライ）。落下時はチェックポイントへ
+func respawn(at: Transform3D = spawn) -> void:
+	global_transform = at
 	velocity = Vector3.ZERO
 	_pending_time = -1.0
+	move = null
+	_set_height(STAND_HEIGHT)
 	_set_state(State.AIR)
 	reset_physics_interpolation()
-	rig.snap(spawn.basis.get_euler().y)
+	rig.snap(at.basis.get_euler().y)
 
 
 # --- 状態 ---------------------------------------------------------------
@@ -122,9 +161,11 @@ func _ground(delta: float) -> void:
 				_start_hard_land(_pending_drop)
 				return
 	elif _since_jump_press <= params.jump_buffer:
-		if not _try_vault():
+		if not _try_ground_move():
 			_jump()
 			_move(delta, false)  # 押したフレームで上昇を始める
+		return
+	elif _since_crouch_press <= params.move_buffer and _try_slide():
 		return
 
 	_move(delta, true)
@@ -140,13 +181,15 @@ func _air(delta: float) -> void:
 	velocity.x = h.x
 	velocity.z = h.z
 	if not _jumped and _since_floor <= params.coyote_time and _since_jump_press <= params.jump_buffer:
-		if not _try_vault():
+		if not _try_ground_move():
 			_jump()
 			_move(delta, false)
 		return
 	if _jumped and not _jump_cut_done and velocity.y > 0.0 and not Input.is_action_pressed(&"jump"):
 		velocity.y *= 1.0 - params.jump_cut_max
 		_jump_cut_done = true
+	if _try_ledge_from_air() or _try_wall_run():
+		return
 	_move(delta, false)
 	_air_peak_y = maxf(_air_peak_y, global_position.y)
 	if is_on_floor():
@@ -154,26 +197,142 @@ func _air(delta: float) -> void:
 
 
 func _vault(delta: float) -> void:
-	var v := vault
-	vault_progress = clampf(state_time / _vault_duration, 0.0, 1.0)
-	var d := v.back_dist * vault_progress
+	var v := move
+	move_progress = clampf(state_time / _move_duration, 0.0, 1.0)
+	var d := v.back_dist * move_progress
 	var pos := v.start + v.dir * d
 	pos.y = _vault_height(v, d)
-	var prev := global_position
-	global_position = pos
-	velocity = (pos - prev) / delta
-	if vault_progress >= 1.0:
-		var out := v.dir * maxf(_vault_speed_in, params.walk_speed) * params.vault_speed_keep
-		velocity = Vector3(out.x, 0.0, out.z)
-		vault = null
-		if v.land_on_ground:
-			apply_floor_snap()
-			_set_state(State.GROUND)
-			_since_floor = 0.0
-			if _since_jump_press <= params.move_buffer:
-				_vault_or_jump()  # 技の最中の先行入力
+	_teleport(pos, delta)
+	if move_progress >= 1.0:
+		var out := v.dir * maxf(_move_speed_in, params.walk_speed) * params.vault_speed_keep
+		_finish_move(v, out)
+
+
+## よじ登り：まず壁際で縁の上まで体を上げ（前半55%）、それから上面へ進む
+func _climb(delta: float) -> void:
+	var v := move
+	move_progress = clampf(state_time / _move_duration, 0.0, 1.0)
+	var over := v.top_y + params.vault_clearance
+	var pos: Vector3
+	if move_progress < 0.55:
+		var u := move_progress / 0.55
+		pos = v.start + v.dir * (_climb_rise_d * u)
+		pos.y = lerpf(v.start.y, over, _ease_out(u))
+	else:
+		var u := (move_progress - 0.55) / 0.45
+		pos = v.start + v.dir * lerpf(_climb_rise_d, v.back_dist, _ease_out(u))
+		pos.y = lerpf(over, v.land.y, u)
+	_teleport(pos, delta)
+	if move_progress >= 1.0:
+		var out := v.dir * clampf(_move_speed_in, params.walk_speed, params.run_speed) * 0.6
+		_finish_move(v, out)
+
+
+func _ledge_hang(_delta: float) -> void:
+	velocity = Vector3.ZERO
+	var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+	if _since_jump_press <= params.move_buffer or input.y < -0.6:
+		_start_climb(move)
+		return
+	if Input.is_action_just_pressed(&"crouch") or input.y > 0.6:
+		_drop_from_wall(move.dir * -1.0)
+		return
+	# 横移動：縁が続く所までだけ動く
+	if absf(input.x) > 0.3:
+		var lateral := move.dir.cross(Vector3.UP).normalized() * signf(input.x)
+		var step := lateral * params.ledge_shimmy_speed * get_physics_process_delta_time()
+		var probe_from := global_position + step
+		var saved := global_position
+		global_position = probe_from
+		var r := VaultProbe.ledge(self, move.dir, 0.6, HANG_DROP - 0.4, HANG_DROP + 0.4, 10.0, _capsule.radius, STAND_HEIGHT)
+		if r == null or test_move(Transform3D(basis, saved), step):
+			global_position = saved
 		else:
-			_leave_ground()
+			move = r
+
+
+func _wall_run(delta: float) -> void:
+	var h_now := Vector3(velocity.x, 0.0, velocity.z)
+	var along := _along_wall(h_now)
+	# 壁に沿った成分だけを速さとする（押し付け成分を数えると毎フレーム速くなる）
+	var spd := maxf(h_now.dot(along), params.wallrun_min_speed)
+	if _since_jump_press <= params.move_buffer:
+		_wall_jump(along, spd)
+		return
+	var wall := VaultProbe.side_wall(self, along, _capsule.radius + WALL_DETECT)
+	var input := _desired_velocity()
+	var leaving := input != Vector3.ZERO and input.normalized().dot(wall_normal) > 0.5
+	if wall.is_empty() or state_time > params.wallrun_max_time or leaving or spd < params.wallrun_min_speed * 0.6:
+		_drop_from_wall(Vector3.ZERO)
+		return
+	wall_normal = Vector3(wall.normal.x, 0.0, wall.normal.z).normalized()
+	wall_side = wall.side
+	var h := along * minf(spd, params.max_flow_speed) - wall_normal * 1.0  # 壁へ軽く押し付ける
+	var vy := velocity.y - params.gravity() * params.wallrun_gravity * delta
+	velocity = Vector3(h.x, vy, h.z)
+	move_and_slide()
+	if is_on_floor():
+		_land()
+
+
+## 縦のウォールラン：壁に正対して駆け上がる。届けば縁を掴む
+func _wall_climb(delta: float) -> void:
+	if _since_jump_press <= params.move_buffer and state_time > 0.1:
+		# 壁を蹴って後ろへ
+		velocity = wall_normal * params.run_speed * 0.6 + Vector3.UP * params.jump_velocity() * 0.8
+		_since_jump_press = INF
+		_wall_cooldown = WALL_COOLDOWN
+		_last_wall_normal = wall_normal
+		_leave_ground()
+		_jumped = true
+		wall_jumped.emit()
+		return
+	var r := VaultProbe.ledge(self, -wall_normal, WALL_DETECT, 0.4, params.ledge_reach, 20.0, _capsule.radius, STAND_HEIGHT)
+	if r != null:
+		_start_climb(r)
+		return
+	velocity = Vector3(-wall_normal.x, velocity.y, -wall_normal.z)
+	_move(delta, false)
+	if velocity.y <= 0.0 or VaultProbe.front_wall(self, -wall_normal, _capsule.radius + WALL_DETECT, 1.6).is_empty():
+		_drop_from_wall(wall_normal * 0.5)
+
+
+func _slide(delta: float) -> void:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var spd := h.length()
+	var dir := h.normalized() if spd > 0.01 else Vector3.ZERO
+	# 坂：重力の斜面方向成分で加速。平地では摩擦で少しずつ減速
+	var n := get_floor_normal() if is_on_floor() else Vector3.UP
+	var downhill := Vector3.DOWN - n * n.dot(Vector3.DOWN)
+	var slope_acc := Vector3(downhill.x, 0.0, downhill.z) * params.gravity()
+	var accelerating := slope_acc.length() > 0.5 and slope_acc.dot(dir) > 0.0
+	h += slope_acc * delta
+	if not accelerating:
+		h = h.move_toward(Vector3.ZERO, params.slide_friction * delta)
+	# 向きは少しだけ変えられる
+	var want := _desired_velocity()
+	if want != Vector3.ZERO and h.length() > 0.1:
+		h = h.slerp(want.normalized() * h.length(), minf(1.0, 1.5 * delta))
+	h = h.limit_length(params.max_flow_speed)
+	velocity = Vector3(h.x, minf(velocity.y, 0.0), h.z)
+
+	if _since_jump_press <= params.jump_buffer and VaultProbe.can_stand(self, _capsule.radius, STAND_HEIGHT):
+		var boosted := h * (1.0 + params.slide_jump_bonus)
+		velocity = Vector3(boosted.x, 0.0, boosted.z).limit_length(params.max_flow_speed)
+		_set_height(STAND_HEIGHT)
+		_jump()
+		_move(delta, false)
+		return
+	_move(delta, true)
+	if not is_on_floor():
+		if VaultProbe.can_stand(self, _capsule.radius, STAND_HEIGHT):
+			_set_height(STAND_HEIGHT)
+		_leave_ground()
+		return
+	var done := (state_time >= params.slide_time and not accelerating) or h.length() < 2.0
+	if done and VaultProbe.can_stand(self, _capsule.radius, STAND_HEIGHT):
+		_set_height(STAND_HEIGHT)
+		_set_state(State.GROUND)
 
 
 func _roll(delta: float) -> void:
@@ -190,7 +349,7 @@ func _roll(delta: float) -> void:
 		_leave_ground()
 	elif t >= 0.5 and _since_jump_press <= params.move_buffer:
 		_set_state(State.GROUND)
-		_vault_or_jump()
+		_ground_move_or_jump()
 	elif t >= 1.0:
 		_set_state(State.GROUND)
 
@@ -211,8 +370,13 @@ func _set_state(s: State) -> void:
 	state_time = 0.0
 
 
-func _vault_or_jump() -> void:
-	if not _try_vault():
+## 地上でジャンプを押した時の優先順：ヴォルト → クライム → 縦ウォールラン（どれも無理ならfalse）
+func _try_ground_move() -> bool:
+	return _try_vault() or _try_climb() or _try_wall_climb()
+
+
+func _ground_move_or_jump() -> void:
+	if not _try_ground_move():
 		_jump()
 
 
@@ -245,6 +409,8 @@ func _land() -> void:
 		else:
 			_pending_drop = drop
 			_pending_time = 0.0
+	elif _since_crouch_press <= params.roll_window_before or Input.is_action_pressed(&"crouch"):
+		_try_slide()  # 着地にしゃがみを合わせると、そのままスライドへ
 
 
 func _start_roll(drop: float) -> void:
@@ -266,19 +432,177 @@ func _try_vault() -> bool:
 	if spd < params.vault_min_speed:
 		return false
 	var dir := Vector3(velocity.x, 0.0, velocity.z).normalized()
-	var r := VaultProbe.probe(self, dir, spd, params, _capsule.radius, _capsule.height)
+	var r := VaultProbe.probe(self, dir, spd, params, _capsule.radius, STAND_HEIGHT)
 	if r == null:
 		return false
-	vault = r
-	vault_progress = 0.0
-	_vault_speed_in = spd
-	_vault_duration = clampf(r.back_dist / (spd * params.vault_speed_keep),
+	move = r
+	move_progress = 0.0
+	_move_speed_in = spd
+	_move_duration = clampf(r.back_dist / (spd * params.vault_speed_keep),
 			params.vault_min_duration, params.vault_max_duration)
 	_since_jump_press = INF
 	_pending_time = -1.0
 	_set_state(State.VAULT)
 	vault_started.emit()
 	return true
+
+
+## 地上から：向いている方向に手の届く縁があれば登る
+func _try_climb() -> bool:
+	var r := VaultProbe.ledge(self, _facing(), 0.7, params.vault_min_height, params.climb_max_height,
+			params.vault_auto_align_deg, _capsule.radius, STAND_HEIGHT)
+	if r == null:
+		return false
+	_start_climb(r)
+	return true
+
+
+func _start_climb(r: VaultProbe.Result) -> void:
+	move = r
+	move_progress = 0.0
+	move.start = global_position
+	_move_speed_in = horizontal_speed()
+	var k := clampf(_move_speed_in / params.run_speed, 0.0, 1.0)
+	_move_duration = params.climb_time * lerpf(1.0, params.climb_fast_mult, k)
+	# 前面との距離を測り直す（ぶら下がりや縦ウォールランから来た時は start が変わっている）
+	var front_dist := (r.hand - global_position).dot(r.dir) - 0.12
+	_climb_rise_d = maxf(front_dist - _capsule.radius - 0.02, 0.0)
+	move.back_dist = front_dist + _capsule.radius + 0.3
+	_since_jump_press = INF
+	_pending_time = -1.0
+	_set_state(State.CLIMB)
+	climb_started.emit()
+
+
+## 縦のウォールラン：壁に正対してジャンプ
+func _try_wall_climb() -> bool:
+	if horizontal_speed() < params.wallrun_up_min_speed:
+		return false
+	var dir := _facing()
+	var hit := VaultProbe.front_wall(self, dir, _capsule.radius + 0.7)
+	if hit.is_empty():
+		return false
+	var n: Vector3 = hit.normal
+	n = Vector3(n.x, 0.0, n.z).normalized()
+	if rad_to_deg((-n).angle_to(dir)) > params.vault_auto_align_deg:
+		return false
+	wall_normal = n
+	velocity = Vector3(0.0, sqrt(2.0 * params.gravity() * params.wallrun_up_height), 0.0)
+	_since_jump_press = INF
+	_set_state(State.WALL_CLIMB)
+	_jumped = true
+	wallrun_started.emit()
+	return true
+
+
+## 空中で縁に手が届いたら掴む。前を押していればそのまま登る、押していなければぶら下がる
+func _try_ledge_from_air() -> bool:
+	if velocity.y > 2.0:
+		return false
+	var dir := _facing()
+	var want := _desired_velocity()
+	var toward := Vector3(velocity.x, 0.0, velocity.z)
+	if want.dot(dir) <= 0.0 and toward.dot(dir) < 1.0:
+		return false
+	var r := VaultProbe.ledge(self, dir, WALL_DETECT, 1.0, params.ledge_reach, params.vault_auto_align_deg,
+			_capsule.radius, STAND_HEIGHT)
+	if r == null:
+		return false
+	if _wall_cooldown > 0.0 and (-r.dir).dot(_last_wall_normal) > 0.9:
+		return false
+	if want.dot(r.dir) > 0.5 * params.run_speed or Input.is_action_pressed(&"jump"):
+		_start_climb(r)
+		return true
+	# ぶら下がる：手を縁に、体を壁際へ
+	move = r
+	var hang := r.hand - r.dir * (0.12 + _capsule.radius + 0.02)
+	hang.y = r.top_y - HANG_DROP
+	global_position = hang
+	velocity = Vector3.ZERO
+	_set_state(State.LEDGE_HANG)
+	ledge_grabbed.emit()
+	return true
+
+
+## 空中で横に壁があり、速度と角度の条件を満たせばウォールラン
+func _try_wall_run() -> bool:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	if h.length() < params.wallrun_min_speed or velocity.y < -6.0:
+		return false
+	var dir := h.normalized()
+	var wall := VaultProbe.side_wall(self, dir, _capsule.radius + WALL_DETECT)
+	if wall.is_empty():
+		return false
+	var n: Vector3 = wall.normal
+	n = Vector3(n.x, 0.0, n.z).normalized()
+	if _wall_cooldown > 0.0 and n.dot(_last_wall_normal) > 0.9:
+		return false
+	var into := -dir.dot(n)
+	if into < -0.05:
+		return false  # 壁から離れていく
+	var angle := rad_to_deg(asin(clampf(into, 0.0, 1.0)))
+	if angle < params.wallrun_min_angle or angle > params.wallrun_max_angle:
+		return false
+	wall_normal = n
+	wall_side = wall.side
+	var along := _along_wall(h)
+	var keep := along * h.length()
+	# 跳んだ勢いを残しつつ、上向きを lift〜2×lift に収める（落ちながら張り付いても少し持ち上げる）
+	velocity = Vector3(keep.x, clampf(velocity.y, params.wallrun_entry_lift, params.wallrun_entry_lift * 2.0), keep.z)
+	_set_state(State.WALL_RUN)
+	wallrun_started.emit()
+	return true
+
+
+func _wall_jump(along: Vector3, spd: float) -> void:
+	var dir := (along + wall_normal * params.wall_jump_push).normalized()
+	var out := dir * minf(spd * (1.0 + params.wall_jump_speed_bonus), params.max_flow_speed)
+	velocity = Vector3(out.x, params.jump_velocity(), out.z)
+	_since_jump_press = INF
+	_wall_cooldown = WALL_COOLDOWN
+	_last_wall_normal = wall_normal
+	_leave_ground()
+	_jumped = true
+	_jump_cut_done = true
+	wall_jumped.emit()
+
+
+func _drop_from_wall(push: Vector3) -> void:
+	velocity += push
+	_wall_cooldown = WALL_COOLDOWN
+	_last_wall_normal = wall_normal if state != State.LEDGE_HANG else -move.dir
+	move = null
+	_leave_ground()
+	_jumped = true
+
+
+func _try_slide() -> bool:
+	if horizontal_speed() < params.slide_min_speed:
+		return false
+	_since_crouch_press = INF
+	_set_height(params.slide_height)
+	_set_state(State.SLIDE)
+	slide_started.emit()
+	return true
+
+
+func _finish_move(v: VaultProbe.Result, out: Vector3) -> void:
+	velocity = Vector3(out.x, 0.0, out.z)
+	move = null
+	if v.land_on_ground:
+		apply_floor_snap()
+		_set_state(State.GROUND)
+		_since_floor = 0.0
+		if _since_jump_press <= params.move_buffer:
+			_ground_move_or_jump()  # 技の最中の先行入力
+	else:
+		_leave_ground()
+
+
+func _teleport(pos: Vector3, delta: float) -> void:
+	var prev := global_position
+	global_position = pos
+	velocity = (pos - prev) / delta
 
 
 ## ヴォルトの足の高さ：前面までに上面＋余裕まで上がり、上を通り、背面の先で着地点へ下りる
@@ -321,12 +645,24 @@ func _move(delta: float, grounded: bool) -> void:
 	var h_before := Vector3(velocity.x, 0.0, velocity.z)
 	velocity.y = vy_avg
 	move_and_slide()
-	if is_on_wall():
-		var into := -h_before.dot(get_wall_normal())
-		if into > CRASH_SPEED:
-			crashed.emit(into)
+	_check_crash(h_before)
 	if is_equal_approx(velocity.y, vy_avg):
 		velocity.y = vy_next
+
+
+## 壁への激突：壁に向かって CRASH_SPEED 以上で当たった（乗り越えられる段差は _try_step_up が先に処理する）
+func _check_crash(h_before: Vector3) -> void:
+	if not is_on_wall():
+		return
+	for i: int in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		var n := c.get_normal()
+		if absf(n.y) > 0.3:
+			continue  # 段の角など、斜めの接触は激突にしない
+		var into := -h_before.dot(n)
+		if into > CRASH_SPEED:
+			crashed.emit(into)
+			return
 
 
 ## 段差の自動乗り越え：上げる→進む→下ろす を試す
@@ -335,29 +671,42 @@ func _try_step_up(motion: Vector3) -> bool:
 		return false
 	var start := global_transform
 	var col := KinematicCollision3D.new()
-	if not test_move(start, motion, col):
+	# 少し先まで見る（1フレームの移動量だけだと段の角に乗り上げてから気づく）
+	var look := motion.normalized() * maxf(motion.length(), _capsule.radius * 0.5)
+	if not test_move(start, look, col, 0.001, false, 4):
 		return false
-	if absf(col.get_normal().y) > 0.7:
-		return false  # 床や天井で止まっただけ
+	# 当たった位置の高さで判定する。カプセルの丸い底が角に当たると法線が斜め上を向くので、法線では判定しない。
+	# 今立っている床との接触も一緒に返ってくるので、全部の接触から段の縁を探す
+	var is_step := false
+	for i: int in col.get_collision_count():
+		var hit_h := col.get_position(i).y - start.origin.y
+		if hit_h > params.step_height + 0.02 and absf(col.get_normal(i).y) < 0.3:
+			return false  # 段差より高い壁
+		if hit_h >= 0.02 and col.get_normal(i).y < 0.95:
+			is_step = true
+	if not is_step:
+		return false
 	var up := Vector3.UP * params.step_height
 	if test_move(start, up):
 		return false
 	var raised := start.translated(up)
-	# 段の上に乗るのに最低限必要な前進（半径ぶん）を保証する
-	var fwd := motion.normalized() * maxf(motion.length(), _capsule.radius * 0.5)
-	if test_move(raised, fwd):
-		return false
-	var moved := raised.translated(fwd)
-	var down := KinematicCollision3D.new()
-	if not test_move(moved, -up, down):
-		return false
-	if down.get_normal().angle_to(Vector3.UP) > floor_max_angle:
-		return false
-	var before := global_position.y
-	global_position = moved.origin + down.get_travel()
-	rig.absorb_step(global_position.y - before)
-	apply_floor_snap()
-	return true
+	# 下ろした先が段の角だと法線が急になるので、その時はもう少し前に進めて下ろし直す
+	for extra: float in [0.0, _capsule.radius]:
+		var fwd := look + look.normalized() * extra
+		if test_move(raised, fwd):
+			return false
+		var moved := raised.translated(fwd)
+		var down := KinematicCollision3D.new()
+		if not test_move(moved, -up, down):
+			return false
+		if down.get_normal().angle_to(Vector3.UP) > floor_max_angle:
+			continue
+		var before := global_position.y
+		global_position = moved.origin + down.get_travel()
+		rig.absorb_step(global_position.y - before)
+		apply_floor_snap()
+		return true
+	return false
 
 
 ## 速度を目標へ寄せる。通常最高を超えた分は地上で毎秒 overspeed_decay ずつ戻す
@@ -390,11 +739,35 @@ func _desired_velocity() -> Vector3:
 	return dir.normalized() * speed
 
 
+## 体の向き：動いていれば進行方向、止まっていれば視線の向き
+func _facing() -> Vector3:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	if h.length() > 1.0:
+		return h.normalized()
+	return Basis(Vector3.UP, rig.yaw) * Vector3.FORWARD
+
+
+func _along_wall(h: Vector3) -> Vector3:
+	var a := h - wall_normal * h.dot(wall_normal)
+	if a.length() < 0.01:
+		a = wall_normal.cross(Vector3.UP) * signf(wall_side)
+	return a.normalized()
+
+
+## 当たり判定の高さを変える（足元の位置は保つ）
+func _set_height(h: float) -> void:
+	if is_equal_approx(_capsule.height, h):
+		return
+	_capsule.height = h
+	_shape_node.position.y = h * 0.5
+
+
 func _update_stride(delta: float) -> void:
 	prev_stride_phase = stride_phase
-	if state != State.GROUND or not is_on_floor():
+	var running_on_wall := state == State.WALL_RUN or state == State.WALL_CLIMB
+	if not running_on_wall and (state != State.GROUND or not is_on_floor()):
 		return
-	var spd := horizontal_speed()
+	var spd := maxf(horizontal_speed(), absf(velocity.y)) if state == State.WALL_CLIMB else horizontal_speed()
 	if spd < 0.3:
 		return
 	var k := clampf(spd / params.run_speed, 0.0, 1.6)
@@ -406,3 +779,13 @@ func _update_stride(delta: float) -> void:
 	if stride_phase > TAU * 64.0:
 		stride_phase -= TAU * 64.0
 		prev_stride_phase -= TAU * 64.0
+
+
+## 継続する振動（仕様書 4章の表）：ウォールラン中、スライド中（速度に比例）
+func _continuous_haptics() -> void:
+	match state:
+		State.WALL_RUN:
+			Haptics.hold(0.05, 0.15)
+		State.SLIDE:
+			var k := clampf(horizontal_speed() / params.run_speed, 0.0, 1.5)
+			Haptics.hold(0.1 * k, 0.25 * k)

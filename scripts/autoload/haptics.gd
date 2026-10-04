@@ -3,6 +3,7 @@ extends Node
 ## 表の「低周波モーター」= Godotの strong、「高周波モーター」= weak。
 
 var _device: int = -1
+var _hold_until: int = 0
 
 
 func _input(event: InputEvent) -> void:
@@ -37,3 +38,12 @@ func hard_land() -> void:
 
 func grab() -> void:
 	pulse(0.2, 0.6, 60.0)
+
+
+## 継続する振動。毎tick呼ぶ（0.1秒ごとに120 msずつ延長する）
+func hold(low: float, high: float) -> void:
+	var now := Time.get_ticks_msec()
+	if now < _hold_until:
+		return
+	_hold_until = now + 100
+	pulse(low, high, 120.0)

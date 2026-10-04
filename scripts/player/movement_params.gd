@@ -33,6 +33,32 @@ extends Resource
 @export_range(0.15, 0.6, 0.01) var vault_min_duration: float = 0.25
 @export_range(0.3, 1.2, 0.01) var vault_max_duration: float = 0.6
 
+@export_group("クライム・レッジグラブ")
+@export_range(1.0, 3.5, 0.05) var climb_max_height: float = 2.4  ## m。手の届く縁（地上から）
+@export_range(0.2, 1.2, 0.01) var climb_time: float = 0.5        ## s。止まった状態から登りきる時間
+@export_range(0.3, 1.0, 0.05) var climb_fast_mult: float = 0.75  ## 走り速度で来た時の時間倍率（速いほど短い）
+@export_range(1.5, 2.6, 0.05) var ledge_reach: float = 2.2       ## m。空中で足元から手が届く高さ
+@export_range(0.3, 3.0, 0.1) var ledge_shimmy_speed: float = 1.2 ## m/s。ぶら下がり中の横移動
+
+@export_group("ウォールラン")
+@export_range(0.0, 10.0, 0.1) var wallrun_min_speed: float = 5.0
+@export_range(0.3, 3.0, 0.05) var wallrun_max_time: float = 1.6
+@export_range(0.0, 1.0, 0.05) var wallrun_gravity: float = 0.3   ## 通常の重力に対する倍率
+@export_range(0.0, 45.0, 1.0) var wallrun_min_angle: float = 0.0 ## 度。仕様書は15°。平行に近い進入も拾うため0
+@export_range(30.0, 89.0, 1.0) var wallrun_max_angle: float = 60.0
+@export_range(0.0, 5.0, 0.1) var wallrun_entry_lift: float = 2.0 ## m/s。張り付いた瞬間の上向き速度
+@export_range(0.0, 0.5, 0.01) var wall_jump_speed_bonus: float = 0.10
+@export_range(0.0, 2.0, 0.05) var wall_jump_push: float = 0.8    ## 壁から離れる成分の強さ
+@export_range(0.0, 10.0, 0.1) var wallrun_up_min_speed: float = 4.0
+@export_range(0.5, 4.0, 0.1) var wallrun_up_height: float = 2.0  ## m。縦ウォールランで駆け上がる高さ
+
+@export_group("スライド")
+@export_range(0.0, 10.0, 0.1) var slide_min_speed: float = 5.0
+@export_range(0.2, 2.0, 0.05) var slide_time: float = 0.8
+@export_range(0.0, 10.0, 0.1) var slide_friction: float = 2.0    ## m/s 毎秒。平地での減速
+@export_range(0.0, 0.3, 0.01) var slide_jump_bonus: float = 0.08
+@export_range(0.6, 1.4, 0.05) var slide_height: float = 1.0      ## m。スライド中の当たり判定の高さ
+
 @export_group("着地")
 @export_range(0.5, 4.0, 0.1) var roll_min_drop: float = 2.0     ## m。これ以上の落下でローリング可
 @export_range(0.0, 0.4, 0.01) var roll_window_before: float = 0.2

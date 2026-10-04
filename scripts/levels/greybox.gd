@@ -15,8 +15,9 @@ func _ready() -> void:
 
 func _layout() -> Array[Array]:
 	var b: Array[Array] = []
-	# 床（z +20〜-90）
-	b.append([Vector3(0, -0.5, -35), Vector3(44, 1, 110), false, 0.0, 0.0])
+	# 床：z +20〜-82 と、穴（9 m）を挟んで -91〜-135
+	b.append([Vector3(0, -0.5, -31), Vector3(44, 1, 102), false, 0.0, 0.0])
+	b.append([Vector3(0, -0.5, -113), Vector3(44, 1, 44), false, 0.0, 0.0])
 	# --- 主ルート：スタート z=8 から -z へ ---
 	b.append(_wall(0.0, 1.0))                  # ヴォルト 1.0 m
 	b.append(_wall(-8.0, 0.8))                 # ヴォルト 0.8 m（8 m間隔でリズムを作る）
@@ -27,13 +28,20 @@ func _layout() -> Array[Array]:
 	b.append(_wall(-46.0, 1.2))                # ヴォルト 1.2 m
 	b.append_array(_stairs(-50.0, 12))         # 階段で 4.8 m へ
 	b.append([Vector3(0, 2.4, -61.8), Vector3(LANE, 4.8, 4.4), true, 0.0, 0.0])  # 4.8 m の塔 → ハードランディング
+	b.append([Vector3(0, 1.45, -75.5), Vector3(12, 0.6, 3), true, 0.0, 0.0])     # 下が 1.15 m のバー：スライドでくぐる
+	b.append([Vector3(1.0, 2.0, -87), Vector3(0.5, 4, 14), true, 0.0, 0.0])      # 穴の右の壁：ウォールランで越える
+	b.append([Vector3(0, 1.2, -102), Vector3(LANE, 2.4, 4), true, 0.0, 0.0])     # 2.4 m の壁：クライム
+	b.append([Vector3(0, 2.0, -115), Vector3(LANE, 4.0, 6), true, 0.0, 0.0])     # 4 m の壁：縦ウォールラン → 縁を掴む
 	# --- 試し用（主ルートの外）---
-	b.append([Vector3(14, 2.0, -12), Vector3(0.5, 4, 16), true, 0.0, 0.0])        # ウォールラン用の壁（M2）
-	b.append([Vector3(-14, 1.0, -16), Vector3(4, 0.4, 14), false, 0.0, -10.0])    # 下り坂（M2 スライド）
+	b.append([Vector3(14, 2.0, -12), Vector3(0.5, 4, 16), true, 0.0, 0.0])        # 壁ジャンプ回廊（左右交互）
+	b.append([Vector3(18, 2.0, -16), Vector3(0.5, 4, 16), true, 0.0, 0.0])
+	b.append([Vector3(-14, 1.0, -16), Vector3(4, 0.4, 14), false, 0.0, -10.0])    # 下り坂：スライドで加速
 	b.append([Vector3(8, 0.3, -4), Vector3(3, 0.6, 0.5), true, 0.0, 0.0])         # ヴォルト下限 0.6 m
 	b.append([Vector3(8, 0.65, -12), Vector3(3, 1.3, 0.5), true, 0.0, 0.0])       # ヴォルト上限 1.3 m
 	b.append([Vector3(8, 0.5, -20), Vector3(3, 1.0, 0.5), true, 30.0, 0.0])       # 斜め30°（自動補正の外）
 	b.append([Vector3(-8, 0.5, -4), Vector3(3, 1.0, 0.5), true, 20.0, 0.0])       # 斜め20°（自動補正の内）
+	b.append([Vector3(-8, 1.0, -30), Vector3(3, 2.0, 3), true, 0.0, 0.0])         # 2.0 m：歩いてクライム
+	b.append([Vector3(-8, 3.0, -40), Vector3(3, 6.0, 3), true, 0.0, 0.0])         # 6 m：縦ウォールランでも届かない
 	return b
 
 

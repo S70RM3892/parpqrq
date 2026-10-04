@@ -23,6 +23,9 @@ const VAULT_PITCH_DEG := 8.0        ## ヴォルト前半の前傾
 const ROLL_PITCH_DEG := 30.0
 const ROLL_EYE_DROP := 0.55         ## m
 const HARD_LAND_EYE_DROP := 0.35    ## m
+const SLIDE_EYE_DROP := 0.9         ## m
+const SLIDE_PITCH_DEG := 5.0        ## 後傾
+const WALLRUN_ROLL_DEG := 10.0      ## 壁と反対側へ
 const SHAKE_DECAY := 1.5            ## トラウマ/秒
 const SHAKE_ROT_DEG := Vector3(2.0, 2.0, 3.0)
 const SHAKE_POS := 0.03
@@ -49,6 +52,7 @@ var _dip_amount: float = 0.0
 var _dip_t: float = INF
 var _pose_drop: float = 0.0
 var _pose_pitch: float = 0.0
+var _pose_roll: float = 0.0
 var _step_offset: float = 0.0
 var _trauma: float = 0.0
 var _time: float = 0.0
@@ -193,15 +197,24 @@ func _update_camera_layer(delta: float) -> void:
 			var t := clampf(p.state_time / p.params.hard_land_stun, 0.0, 1.0)
 			drop_target = HARD_LAND_EYE_DROP * (1.0 - smoothstep(0.55, 1.0, t))
 			pitch_target = -6.0 * (1.0 - smoothstep(0.55, 1.0, t))
-		Player.State.VAULT:
+		Player.State.VAULT, Player.State.CLIMB:
 			# 技の前半に手を見下ろす
-			pitch_target = -VAULT_PITCH_DEG * sin(PI * clampf(p.vault_progress / 0.5, 0.0, 1.0))
+			pitch_target = -VAULT_PITCH_DEG * sin(PI * clampf(p.move_progress / 0.5, 0.0, 1.0))
+		Player.State.SLIDE:
+			drop_target = SLIDE_EYE_DROP
+			pitch_target = SLIDE_PITCH_DEG
+	var roll_target := 0.0
+	if p.state == Player.State.WALL_RUN:
+		# 右の壁なら左へ傾ける（rotation.z が + で視界は左に傾く）
+		roll_target = WALLRUN_ROLL_DEG * p.wall_side
 	_pose_drop = lerpf(_pose_drop, drop_target, 1.0 - exp(-25.0 * delta))
 	_pose_pitch = lerpf(_pose_pitch, pitch_target, 1.0 - exp(-25.0 * delta))
+	_pose_roll = lerpf(_pose_roll, roll_target, 1.0 - exp(-12.0 * delta))
 	var dip_k := 1.0 if on else 0.0
 	_set_layer(&"dip", Vector3(0.0, -(dip + _pose_drop) * dip_k, 0.0), Vector3.ZERO)
 	var nod := -3.0 * dip / DIP_MAX
-	_set_layer(&"tilt", Vector3.ZERO, Vector3(deg_to_rad((_pose_pitch + nod) * Settings.camera_tilt_strength * dip_k), 0.0, 0.0))
+	var tilt_k := Settings.camera_tilt_strength * dip_k
+	_set_layer(&"tilt", Vector3.ZERO, Vector3(deg_to_rad((_pose_pitch + nod) * tilt_k), 0.0, deg_to_rad(_pose_roll * tilt_k)))
 
 
 func _update_shake(delta: float) -> void:

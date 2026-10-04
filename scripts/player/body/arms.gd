@@ -2,7 +2,7 @@ class_name FirstPersonArms
 extends Node3D
 ## 1人称の腕（仕様書 4章「体」）。Camera3D の子に置く。
 ## - 走行中は速度に応じて腕を大きく振る（速度メーターの代わり）
-## - ヴォルトでは手が先に障害物の上面に着く（「掴んだ」確信）
+## - ヴォルト・クライム・ぶら下がりでは手が先に縁に着く（「掴んだ」確信）
 ## モデルは骨格のない前腕＋手の剛体なので、袖口を原点に位置と向きだけで動かす。
 
 const SHOULDER := Vector3(0.2, -0.36, 0.22)  ## 右肩（カメラ基準）。左はxを反転
@@ -35,7 +35,8 @@ func _process(delta: float) -> void:
 	visible = Settings.feel_body
 	if p == null or not visible:
 		return
-	var rate := 40.0 if p.state == Player.State.VAULT else 18.0
+	var planting := p.state == Player.State.VAULT or p.state == Player.State.CLIMB or p.state == Player.State.LEDGE_HANG
+	var rate := 40.0 if planting else 18.0
 	var w := 1.0 - exp(-rate * delta)
 	_right.transform = _right.transform.interpolate_with(_pose(1.0, p), w)
 	_left.transform = _left.transform.interpolate_with(_pose(-1.0, p), w)
@@ -56,14 +57,31 @@ func _pose(side: float, p: Player) -> Transform3D:
 			theta = -10.0
 		Player.State.ROLL:
 			theta = -75.0
+		Player.State.WALL_RUN:
+			# 壁側の手を上げて壁に添える、反対の手は振る
+			var wall_hand := side == p.wall_side
+			theta = 5.0 if wall_hand else REST_DEG + SWING_DEG * (0.5 - 0.5 * side * sin(p.stride_phase_interpolated()))
+		Player.State.WALL_CLIMB:
+			theta = 30.0 + 20.0 * side * sin(p.stride_phase_interpolated())
+		Player.State.SLIDE:
+			theta = -15.0 if side > 0.0 else -65.0
 		Player.State.HARD_LAND:
 			var t := p.state_time / prm.hard_land_stun
 			theta = 0.0 if t < 0.5 else REST_DEG  # 両手を前に出して着地を受ける
 	var xf := _arm(side, theta)
-	if p.state == Player.State.VAULT and p.vault != null and (side < 0.0 or p.vault.onto):
-		var u := p.vault_progress
-		var wgt := smoothstep(0.0, 0.18, u) * (1.0 - smoothstep(0.55, 0.8, u))
-		xf = xf.interpolate_with(_plant(side, p.vault), wgt)
+	if p.move == null:
+		return xf
+	var u := p.move_progress
+	match p.state:
+		Player.State.VAULT:
+			# 片手（深い箱に乗る時は両手）を先に着く
+			if side < 0.0 or p.move.onto:
+				xf = xf.interpolate_with(_plant(side, p.move), smoothstep(0.0, 0.18, u) * (1.0 - smoothstep(0.55, 0.8, u)))
+		Player.State.CLIMB:
+			# 両手で縁を掴み、体が上がりきるまで離さない
+			xf = xf.interpolate_with(_plant(side, p.move), smoothstep(0.0, 0.1, u) * (1.0 - smoothstep(0.7, 0.95, u)))
+		Player.State.LEDGE_HANG:
+			xf = _plant(side, p.move)
 	return xf
 
 

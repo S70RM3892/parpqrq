@@ -64,6 +64,107 @@ func _run() -> void:
 	_check_near("retry returns to spawn", p.global_position.distance_to(Vector3(0, 0, 8)), 0.0, 0.05)
 
 	await _course_run(p)
+	await _crash_test(p)
+	await _wall_jump_test(p)
+	await _ledge_test(p)
+	await _slide_slope_test(p)
+
+
+## ジャンプせずに 1.0 m の壁へ走り込むと激突になる（段差の判定と取り違えない）
+func _crash_test(p: Player) -> void:
+	await _place(p, Vector3(0.0, 0.0, 6.0), Vector3.ZERO)
+	var c := {"crash": 0}
+	var on_crash := func(_s: float) -> void: c.crash += 1
+	p.crashed.connect(on_crash)
+	Input.action_press(&"move_forward")
+	await _seconds(1.2)
+	Input.action_release(&"move_forward")
+	p.crashed.disconnect(on_crash)
+	_check_true("crash: running into a 1.0 m wall counts as a crash (%d)" % c.crash, c.crash >= 1)
+
+
+func _place(p: Player, pos: Vector3, vel: Vector3) -> void:
+	p.respawn(Transform3D(Basis.IDENTITY, pos))
+	p.velocity = vel
+	await get_tree().physics_frame
+
+
+## 壁ジャンプ回廊：左の壁を走る → 壁ジャンプ（速度+10%）→ 右の壁に張り付く
+func _wall_jump_test(p: Player) -> void:
+	await _place(p, Vector3(14.45, 0.0, -2.0), Vector3.ZERO)
+	await _frames(5)
+	var c := {"runs": 0, "jumps": 0, "speed_after": 0.0}  # ラムダはローカルを値でコピーするので参照型で数える
+	var speed_before := 0.0
+	var on_run := func() -> void: c.runs += 1
+	var on_jump := func() -> void:
+		c.jumps += 1
+		c.speed_after = p.horizontal_speed()
+	p.wallrun_started.connect(on_run)
+	p.wall_jumped.connect(on_jump)
+	Input.action_press(&"move_forward")
+	await _seconds(0.8)
+	Input.action_press(&"jump")
+	await get_tree().physics_frame
+	Input.action_release(&"jump")
+	for i: int in 30:
+		await get_tree().physics_frame
+		if OS.get_environment("SMOKE_TRACE") != "":
+			print("  wj x=%.2f y=%.2f z=%.2f st=%d spd=%.2f" % [p.global_position.x, p.global_position.y, p.global_position.z, p.state, p.horizontal_speed()])
+		if p.state == Player.State.WALL_RUN:
+			break
+	speed_before = p.horizontal_speed()
+	await _seconds(0.3)
+	Input.action_press(&"jump")
+	await get_tree().physics_frame
+	Input.action_release(&"jump")
+	Input.action_press(&"move_right")  # 反対の壁の方へ倒す
+	await _seconds(0.8)
+	Input.action_release(&"move_right")
+	Input.action_release(&"move_forward")
+	p.wallrun_started.disconnect(on_run)
+	p.wall_jumped.disconnect(on_jump)
+	_check_true("wall jump: ran on a wall (runs %d)" % c.runs, c.runs >= 1)
+	_check_true("wall jump: jumped off (jumps %d)" % c.jumps, c.jumps >= 1)
+	_check_near("wall jump: speed +10%", c.speed_after, speed_before * (1.0 + p.params.wall_jump_speed_bonus), 0.3)
+	_check_true("wall jump: caught the opposite wall (runs %d)" % c.runs, c.runs >= 2)
+
+
+## 2.0 m の箱：空中で縁を掴んでぶら下がる → 横移動 → 登る
+func _ledge_test(p: Player) -> void:
+	await _place(p, Vector3(-8.0, 0.8, -27.7), Vector3(0, 0, -2.0))
+	for i: int in 30:
+		await get_tree().physics_frame
+		if p.state == Player.State.LEDGE_HANG:
+			break
+	_check_true("ledge: grabbed and hanging", p.state == Player.State.LEDGE_HANG)
+	var x0 := p.global_position.x
+	Input.action_press(&"move_right")
+	await _seconds(0.5)
+	Input.action_release(&"move_right")
+	_check_near("ledge: shimmied right", p.global_position.x - x0, p.params.ledge_shimmy_speed * 0.5, 0.15)
+	Input.action_press(&"jump")
+	await get_tree().physics_frame
+	Input.action_release(&"jump")
+	await _seconds(0.8)
+	_check_near("ledge: climbed onto the 2.0 m box", p.global_position.y, 2.0, 0.05)
+
+
+## 下り坂のスライドは 0.8 s を過ぎても加速し続ける
+func _slide_slope_test(p: Player) -> void:
+	await _place(p, Vector3(-14.0, 2.6, -10.0), Vector3(0, 0, -6.0))
+	Input.action_press(&"move_forward")
+	for i: int in 30:
+		await get_tree().physics_frame
+		if p.is_on_floor():
+			break
+	var v0 := p.horizontal_speed()
+	Input.action_press(&"crouch")
+	await get_tree().physics_frame
+	Input.action_release(&"crouch")
+	await _seconds(1.0)
+	_check_true("slide slope: still sliding after 1.0 s (state %d)" % p.state, p.state == Player.State.SLIDE)
+	_check_true("slide slope: accelerating (%.2f -> %.2f m/s)" % [v0, p.horizontal_speed()], p.horizontal_speed() > v0 + 0.5)
+	Input.action_release(&"move_forward")
 
 
 ## コースを自動で走る。前進は押しっぱなし、決まった位置でジャンプ・しゃがみを押す
@@ -72,10 +173,16 @@ func _course_run(p: Player) -> void:
 	p.respawn()
 	await _frames(10)
 	# z がこの値を下回ったらジャンプ（障害物の前面 + 届く距離の手前）
-	var jump_at: Array[float] = [1.9, -6.1, -34.3, -44.1]
+	var jump_at: Array[float] = [1.9, -6.1, -34.3, -44.1, -81.3, -99.2, -111.2]
 	var labels: Array[String] = ["vault 1.0 m", "vault 0.8 m", "vault onto 1.0 m box", "vault 1.2 m"]
-	var vaulted: Array[bool] = [false, false, false, false]
-	var speed_after: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var vaulted: Array[bool] = [false, false, false, false, false, false, false]
+	var speed_after: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	var seen: Dictionary[Player.State, bool] = {}
+	var slide_pressed := false
+	var slide_cleared := false
+	var wallrun_cleared := false
+	var roll2_pressed := false
+	var top_y := 0.0
 	var next_jump := 0
 	var was_vault := false
 	var max_y_stairs1 := 0.0
@@ -86,21 +193,43 @@ func _course_run(p: Player) -> void:
 	var was_roll := false
 	var hard := false
 	var y_on_box := 0.0
-	var crashed := 0
-	p.crashed.connect(func(_s: float) -> void: crashed += 1)
+	var counts := {"crash": 0}  # ラムダはローカルを値でコピーするので参照型で数える
+	var on_crash := func(spd: float) -> void:
+		counts.crash += 1
+		print("  crash at z=%.2f y=%.2f state=%d speed=%.2f" % [p.global_position.z, p.global_position.y, p.state, spd])
+	p.crashed.connect(on_crash)
 	var label := get_tree().root.find_child("Time", true, false) as Label
 	Input.action_press(&"move_forward")
 	for i: int in 60 * 25:
 		await get_tree().physics_frame
 		var z := p.global_position.z
 		var y := p.global_position.y
-		if OS.get_environment("SMOKE_TRACE") != "" and z < -31.0 and z > -38.0:
+		if OS.get_environment("SMOKE_TRACE") != "" and z < -70.0:
 			print("  z=%.2f y=%.2f st=%d spd=%.2f vy=%.2f" % [z, y, p.state, p.horizontal_speed(), p.velocity.y])
 		if next_jump < jump_at.size() and z < jump_at[next_jump]:
 			Input.action_press(&"jump")
 			await get_tree().physics_frame
 			Input.action_release(&"jump")
 			next_jump += 1
+		seen[p.state] = true
+		# スライドでバーをくぐる
+		if not slide_pressed and z < -72.6:
+			Input.action_press(&"crouch")
+			await get_tree().physics_frame
+			Input.action_release(&"crouch")
+			slide_pressed = true
+		if z < -77.5 and z > -80.0 and y < 0.5:
+			slide_cleared = true
+		if z < -92.0 and z > -95.0 and y > -0.5:
+			wallrun_cleared = true
+		# 2.4 m の壁の上から降りる時もローリング
+		if z < -104.0 and z > -108.0 and not roll2_pressed and p.state == Player.State.AIR and p.velocity.y < 0.0 and y < 0.5:
+			Input.action_press(&"crouch")
+			await get_tree().physics_frame
+			Input.action_release(&"crouch")
+			roll2_pressed = true
+		if z < -112.5 and z > -118.0:
+			top_y = maxf(top_y, y)
 		if p.state == Player.State.VAULT:
 			vaulted[next_jump - 1] = true
 		elif was_vault:
@@ -120,7 +249,7 @@ func _course_run(p: Player) -> void:
 			roll_pressed = true
 		if p.state == Player.State.ROLL:
 			rolled = true
-		elif was_roll:
+		elif was_roll and z > -40.0:
 			roll_end_speed = p.horizontal_speed()
 		was_roll = p.state == Player.State.ROLL
 		if p.state == Player.State.HARD_LAND:
@@ -129,7 +258,7 @@ func _course_run(p: Player) -> void:
 			break
 	Input.action_release(&"move_forward")
 	var keep := mp.run_speed * mp.vault_speed_keep
-	for k: int in labels.size():
+	for k: int in labels.size():  # 先頭4つがヴォルト
 		_check_true("%s: vaulted" % labels[k], vaulted[k])
 		if k != 2:
 			_check_near("%s: speed kept" % labels[k], speed_after[k], keep, keep * 0.06)
@@ -139,7 +268,15 @@ func _course_run(p: Player) -> void:
 	_check_near("roll keeps speed", roll_end_speed, mp.run_speed, mp.run_speed * 0.08)
 	_check_true("stairs climbed to 4.8 m (got %.2f)" % max_y_stairs2, max_y_stairs2 > 4.75)
 	_check_true("hard landing after 4.8 m drop without roll", hard)
-	_check_true("no wall crash on the clean line (got %d)" % crashed, crashed == 0)
+	_check_true("slide: entered SLIDE", seen.has(Player.State.SLIDE))
+	_check_true("slide: passed under the 1.15 m bar", slide_cleared)
+	_check_true("wall run: entered WALL_RUN", seen.has(Player.State.WALL_RUN))
+	_check_true("wall run: crossed the 9 m pit", wallrun_cleared)
+	_check_true("climb: entered CLIMB", seen.has(Player.State.CLIMB))
+	_check_true("vertical wall run: entered WALL_CLIMB", seen.has(Player.State.WALL_CLIMB))
+	_check_near("vertical wall run + ledge: on top of 4 m wall", top_y, 4.0, 0.1)
+	p.crashed.disconnect(on_crash)
+	_check_true("no wall crash on the clean line (got %d)" % counts.crash, counts.crash == 0)
 	_check_true("reached goal, timer shown: %s" % (label.text.replace("\n", " ") if label != null else "-"), label != null and label.text != "")
 
 

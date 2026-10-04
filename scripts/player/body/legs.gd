@@ -47,7 +47,7 @@ func _process(delta: float) -> void:
 		(parts[1] as Node3D).rotation = Vector3(deg_to_rad(-a.y), 0.0, 0.0)
 		(parts[2] as Node3D).rotation = Vector3(deg_to_rad(a.z), 0.0, 0.0)
 		lowest = maxf(lowest, _reach(a))
-	var grounded := player.state != Player.State.AIR and player.state != Player.State.VAULT
+	var grounded := player.state in [Player.State.GROUND, Player.State.ROLL, Player.State.HARD_LAND, Player.State.SLIDE]
 	var hip_y := lowest if grounded else KNEE_OFFSET.length() + ANKLE_OFFSET.length() + SOLE_BELOW_ANKLE
 	var origin := player.get_global_transform_interpolated().origin
 	var b := Basis(Vector3.UP, _yaw)
@@ -70,8 +70,19 @@ func _pose(key: StringName, leg_phase: float) -> Vector3:
 			if p.velocity.y < -6.0:
 				return Vector3(15.0, 25.0, 0.0) if right else Vector3(5.0, 35.0, 10.0)
 			return Vector3(30.0, 60.0, 20.0) if right else Vector3(-15.0, 80.0, 40.0)
-		Player.State.VAULT:
+		Player.State.VAULT, Player.State.CLIMB:
 			return Vector3(70.0, 110.0, 30.0) if right else Vector3(55.0, 120.0, 40.0)
+		Player.State.LEDGE_HANG:
+			return Vector3(8.0, 12.0, -10.0) if right else Vector3(2.0, 20.0, -10.0)
+		Player.State.WALL_RUN, Player.State.WALL_CLIMB:
+			var lift := 30.0 if p.state == Player.State.WALL_CLIMB else 0.0
+			var swing_w := pow(maxf(cos(leg_phase), 0.0), 1.5)
+			var hip_w := 38.0 * sin(leg_phase) + lift
+			var knee_w := 95.0 * (0.08 + 0.92 * swing_w)
+			return Vector3(hip_w, knee_w, (knee_w - hip_w) * 0.85)
+		Player.State.SLIDE:
+			# 片脚を前に伸ばし、もう片方を畳む（下を見ると前に伸びた脚が見える）
+			return Vector3(75.0, 8.0, 15.0) if right else Vector3(30.0, 115.0, 35.0)
 		Player.State.ROLL:
 			return Vector3(100.0, 140.0, 30.0)
 		Player.State.HARD_LAND:

@@ -1,7 +1,8 @@
 class_name VaultProbe
 extends RefCounted
-## 前方の障害物をヴォルトできるかを調べる（仕様書 3章「パルクール技」）。
-## 奥行きが vault_max_depth 以下なら飛び越え、それより深ければ上に乗る。
+## 周りの地形を調べる（仕様書 3章「パルクール技」）。
+## probe: ヴォルト（奥行きが vault_max_depth 以下なら飛び越え、深ければ上に乗る）
+## ledge: クライム・レッジグラブの縁 / side_wall・front_wall: ウォールランの壁
 
 ## 判定結果。位置はすべてワールド座標の足元
 class Result:
@@ -88,6 +89,81 @@ static func probe(body: CharacterBody3D, move_dir: Vector3, speed: float, p: Mov
 	if _blocked(space, r.land + Vector3.UP * 0.05, radius, height, excl):
 		return null
 	return r
+
+
+## 手の届く縁を探す（クライム・レッジグラブ）。上面が足元から lo〜hi の高さにあり、上に立てる場所。
+## 戻り値は onto=true の Result（hand = 縁、land = 上面の立ち位置、front_dist = 前面まで）。
+static func ledge(body: CharacterBody3D, move_dir: Vector3, reach: float, lo: float, hi: float,
+		align_deg: float, radius: float, height: float) -> Result:
+	if move_dir.length_squared() < 0.01:
+		return null
+	var space := body.get_world_3d().direct_space_state
+	var feet := body.global_position
+	var excl: Array[RID] = [body.get_rid()]
+	var hit := {}
+	for h: float in [minf(lo, 1.0), 1.2, 1.7]:
+		var from := feet + Vector3.UP * h
+		hit = _ray(space, from, from + move_dir * (radius + reach), excl)
+		if not hit.is_empty() and absf((hit.normal as Vector3).y) < 0.3:
+			break
+		hit = {}
+	if hit.is_empty():
+		return null
+	var n: Vector3 = hit.normal
+	n.y = 0.0
+	var dir := -n.normalized()
+	if rad_to_deg(dir.angle_to(move_dir)) > align_deg:
+		return null
+	var front: Vector3 = hit.position
+	var top_xz := front + dir * 0.12
+	var top_hit := _ray(space, Vector3(top_xz.x, feet.y + hi + 0.3, top_xz.z), Vector3(top_xz.x, feet.y + lo - 0.05, top_xz.z), excl)
+	if top_hit.is_empty() or (top_hit.normal as Vector3).y < 0.8:
+		return null
+	var top_y: float = top_hit.position.y
+	if top_y - feet.y < lo or top_y - feet.y > hi:
+		return null
+	var r := Result.new()
+	r.start = feet
+	r.dir = dir
+	r.hand = top_hit.position
+	r.top_y = top_y
+	r.onto = true
+	r.land_on_ground = true
+	r.front_dist = (front - feet).dot(dir)
+	r.back_dist = r.front_dist + radius + 0.3
+	r.land = feet + dir * r.back_dist
+	r.land.y = top_y
+	if _blocked(space, r.land + Vector3.UP * 0.05, radius, height, excl):
+		return null
+	return r
+
+
+## 進行方向の左右の壁。{normal, point, side(+1=右, -1=左)}、無ければ空
+static func side_wall(body: CharacterBody3D, move_dir: Vector3, dist: float) -> Dictionary:
+	var space := body.get_world_3d().direct_space_state
+	var chest := body.global_position + Vector3.UP * 1.0
+	var right := move_dir.cross(Vector3.UP).normalized()
+	for side: float in [1.0, -1.0]:
+		var hit := _ray(space, chest, chest + right * side * dist, [body.get_rid()] as Array[RID])
+		if not hit.is_empty() and absf((hit.normal as Vector3).y) < 0.3:
+			return {"normal": hit.normal, "point": hit.position, "side": side}
+	return {}
+
+
+## 正面の壁。無ければ空
+static func front_wall(body: CharacterBody3D, dir: Vector3, dist: float, height: float = 1.0) -> Dictionary:
+	var space := body.get_world_3d().direct_space_state
+	var from := body.global_position + Vector3.UP * height
+	var hit := _ray(space, from, from + dir * dist, [body.get_rid()] as Array[RID])
+	if hit.is_empty() or absf((hit.normal as Vector3).y) > 0.3:
+		return {}
+	return hit
+
+
+## 立てるか（スライド後に起き上がれるか）
+static func can_stand(body: CharacterBody3D, radius: float, height: float) -> bool:
+	return not _blocked(body.get_world_3d().direct_space_state, body.global_position + Vector3.UP * 0.02,
+			radius, height, [body.get_rid()] as Array[RID])
 
 
 static func _ray(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, excl: Array[RID]) -> Dictionary:
