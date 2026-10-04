@@ -1,7 +1,7 @@
 class_name ResultsPanel
 extends CanvasLayer
 ## ゴールの結果（仕様書 5・8章：数字は止まった時だけ出す）。
-## タイム・自己ベストとの差・メダル・次のメダルまで・最高速度・Perfect数。
+## タイム・自己ベストとの差・メダル・次のメダルまで・最高速度・Perfect数・見つけた近道の数。
 ## Y / R（リトライ）か「Retry」ですぐ走り直せる（A でも Retry にフォーカスがある）。
 
 signal retry_requested
@@ -87,6 +87,15 @@ func show_result(r: Dictionary, has_next: bool) -> void:
 	lines.append("Top speed %.1f m/s     Perfect x%d" % [r.max_speed, r.perfects])
 	if r.next_medal != "":
 		lines.append("Next: %s %s  (-%.2f s)" % [r.next_medal, UITheme.format_time(r.next_time), t - (r.next_time as float)])
+	var total := int(r.get("shortcuts_total", 0))
+	if total > 0:
+		var found := int(r.get("shortcuts_found", 0))
+		var sc := "Shortcuts found %d / %d" % [found, total]
+		if int(r.get("new_shortcuts", 0)) > 0:
+			sc += "   +%d new" % int(r.new_shortcuts)
+		elif found < total:
+			sc += "   (a marker shows the next one)" if bool(r.get("hint_on", false)) else "   (take GOLD for a hint)"
+		lines.append(sc)
 	if r.route_off:
 		lines.append("Cleared with route color off")
 	_detail.text = "\n".join(lines)

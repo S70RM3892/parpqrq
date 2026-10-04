@@ -35,7 +35,7 @@ func _process(delta: float) -> void:
 	visible = Settings.feel_body
 	if p == null or not visible:
 		return
-	var planting := p.state == Player.State.VAULT or p.state == Player.State.CLIMB or p.state == Player.State.LEDGE_HANG
+	var planting := p.state in [Player.State.VAULT, Player.State.CLIMB, Player.State.LEDGE_HANG, Player.State.SWING, Player.State.ZIPLINE]
 	var rate := 40.0 if planting else 18.0
 	var w := 1.0 - exp(-rate * delta)
 	_right.transform = _right.transform.interpolate_with(_pose(1.0, p), w)
@@ -68,6 +68,8 @@ func _pose(side: float, p: Player) -> Transform3D:
 		Player.State.HARD_LAND:
 			var t := p.state_time / prm.hard_land_stun
 			theta = 0.0 if t < 0.5 else REST_DEG  # 両手を前に出して着地を受ける
+		Player.State.SWING, Player.State.ZIPLINE:
+			theta = 60.0
 	var xf := _arm(side, theta)
 	if p.move == null:
 		return xf
@@ -80,8 +82,8 @@ func _pose(side: float, p: Player) -> Transform3D:
 		Player.State.CLIMB:
 			# 両手で縁を掴み、体が上がりきるまで離さない
 			xf = xf.interpolate_with(_plant(side, p.move), smoothstep(0.0, 0.1, u) * (1.0 - smoothstep(0.7, 0.95, u)))
-		Player.State.LEDGE_HANG:
-			xf = _plant(side, p.move)
+		Player.State.LEDGE_HANG, Player.State.SWING, Player.State.ZIPLINE:
+			xf = _plant(side, p.move)  # 両手で縁・バー・線を握る
 	return xf
 
 

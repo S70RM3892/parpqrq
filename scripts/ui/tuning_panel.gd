@@ -91,9 +91,10 @@ func _rebuild() -> void:
 	for prop: Dictionary in _params.get_property_list():
 		if prop.usage & PROPERTY_USAGE_GROUP:
 			_header(prop.name)
-		elif prop.usage & PROPERTY_USAGE_EDITOR and prop.hint == PROPERTY_HINT_RANGE and prop.type == TYPE_FLOAT:
+		elif prop.usage & PROPERTY_USAGE_EDITOR and prop.hint == PROPERTY_HINT_RANGE and prop.type in [TYPE_FLOAT, TYPE_INT]:
 			var r: PackedStringArray = (prop.hint_string as String).split(",")
-			_slider(_params, prop.name, float(r[0]), float(r[1]), float(r[2]) if r.size() > 2 else 0.01)
+			var is_int: bool = prop.type == TYPE_INT
+			_slider(_params, prop.name, float(r[0]), float(r[1]), float(r[2]) if r.size() > 2 else (1.0 if is_int else 0.01), is_int)
 
 
 func _header(text: String) -> void:
@@ -104,7 +105,7 @@ func _header(text: String) -> void:
 	_list.add_child(l)
 
 
-func _slider(target: Object, prop: String, lo: float, hi: float, step: float) -> void:
+func _slider(target: Object, prop: String, lo: float, hi: float, step: float, is_int: bool = false) -> void:
 	var row := HBoxContainer.new()
 	var name_l := Label.new()
 	name_l.text = prop
@@ -120,7 +121,7 @@ func _slider(target: Object, prop: String, lo: float, hi: float, step: float) ->
 	sl.focus_mode = Control.FOCUS_ALL
 	value_l.text = _fmt(sl.value)
 	sl.value_changed.connect(func(v: float) -> void:
-		target.set(prop, v)
+		target.set(prop, roundi(v) if is_int else v)
 		value_l.text = _fmt(v))
 	row.add_child(name_l)
 	row.add_child(sl)

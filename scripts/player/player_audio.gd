@@ -54,6 +54,12 @@ func _ready() -> void:
 	player.vault_started.connect(func() -> void: _play(&"hand", 0.0))
 	player.climb_started.connect(func() -> void: _play(&"hand", 0.0))
 	player.ledge_grabbed.connect(func() -> void: _play(&"hand", 1.0))
+	player.swing_started.connect(func() -> void: _play(&"hand", 2.0, 0.8))
+	player.zip_started.connect(func() -> void: _play(&"hand", 2.0, 0.75))
+	player.wall_kicked.connect(func() -> void:
+		_play(&"hand", -3.0, 0.7)  # 靴底が壁を叩く
+		_play(&"jump", -8.0, 1.1))
+	player.vault_jumped.connect(func() -> void: _play(&"hand", -2.0, 1.15))  # 手で押し切る音（跳ぶ音は jumped が鳴らす）
 	player.wallrun_started.connect(func() -> void: _play(&"hand", -5.0, 0.85))
 	player.wall_jumped.connect(func() -> void:
 		_play(&"hand", -2.0)
@@ -78,11 +84,13 @@ func _process(delta: float) -> void:
 	var m := player.momentum
 	_breath.volume_db = linear_to_db(lerpf(0.08, 0.45, m))
 	_breath.pitch_scale = lerpf(0.9, 1.45, m)
-	# スライドの擦れ
-	if player.state == Player.State.SLIDE and Audio.enabled:
+	# スライドの擦れ。ジップラインは同じ擦れを高く鳴らして線の唸りにする
+	var zipping := player.state == Player.State.ZIPLINE
+	if (player.state == Player.State.SLIDE or zipping) and Audio.enabled:
 		if not _slide.playing:
 			_slide.play()
-		_slide.volume_db = linear_to_db(clampf(player.horizontal_speed() / prm.run_speed, 0.1, 1.2) * 0.7)
+		_slide.volume_db = linear_to_db(clampf(player.velocity.length() / prm.run_speed, 0.1, 1.2) * (0.5 if zipping else 0.7))
+		_slide.pitch_scale = lerpf(1.6, 2.2, clampf(player.velocity.length() / prm.zip_max_speed, 0.0, 1.0)) if zipping else 1.0
 	elif _slide.playing:
 		_slide.stop()
 	Audio.intensity = m

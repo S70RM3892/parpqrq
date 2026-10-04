@@ -47,7 +47,36 @@ func _layout() -> Array[Array]:
 	b.append([Vector3(-8, 0.5, -4), Vector3(3, 1.0, 0.5), true, 20.0, 0.0])       # 斜め20°（自動補正の内）
 	b.append([Vector3(-8, 1.0, -30), Vector3(3, 2.0, 3), true, 0.0, 0.0])         # 2.0 m：歩いてクライム
 	b.append([Vector3(-8, 3.0, -40), Vector3(3, 6.0, 3), true, 0.0, 0.0])         # 6 m：縦ウォールランでも届かない
+	# --- 1.1 の技の試し用（主ルートの外）---
+	b.append([Vector3(20.75, 3.0, -45), Vector3(0.5, 6, 12), true, 0.0, 0.0])     # ウォールキックの壁（面は x=20.5）
+	b.append([Vector3(-16, 1.5, -52), Vector3(4, 3.0, 3), true, 0.0, 0.0])        # 3.0 m：落ちながらでは届かない縁（蹴り上がって掴む）
+	b.append(_wall_at(12.0, -62.0, 1.0))                                          # ヴォルトジャンプの壁
+	for x: float in [-19.2, -12.8]:                                               # スイングバーの支柱（バーは y=2.4, z=-72）
+		b.append([Vector3(x, 1.4, -72), Vector3(0.2, 2.8, 0.2), false, 0.0, 0.0])
+	b.append([Vector3(-16, 2.75, -72), Vector3(6.6, 0.1, 0.1), true, 0.0, 0.0, Kind.VISUAL])
+	for z: float in [ZIP_HIGH.z, ZIP_LOW.z]:                                      # ジップラインの柱（線の横に立てて腕で吊る）
+		var top := ZIP_HIGH.y if z == ZIP_HIGH.z else ZIP_LOW.y
+		b.append([Vector3(ZIP_HIGH.x + 0.9, (top + 0.3) * 0.5, z), Vector3(0.25, top + 0.3, 0.25), false, 0.0, 0.0])
+		b.append([Vector3(ZIP_HIGH.x + 0.45, top + 0.2, z), Vector3(0.9, 0.12, 0.12), false, 0.0, 0.0, Kind.VISUAL])
 	return b
+
+
+## スイングバー（a, b）とジップライン（高い端, 低い端）
+const BAR_A := Vector3(-19.0, 2.4, -72.0)
+const BAR_B := Vector3(-13.0, 2.4, -72.0)
+const ZIP_HIGH := Vector3(16.0, 6.0, -70.0)
+const ZIP_LOW := Vector3(16.0, 2.6, -96.0)
+
+
+func _lines(geo: LevelGeometry, grabs: GrabLines) -> void:
+	geo.add_beam(BAR_A, BAR_B, 0.05, LevelStyle.Mat.ROUTE)
+	grabs.add_bar(BAR_A, BAR_B)
+	geo.add_beam(ZIP_HIGH, ZIP_LOW, 0.025, LevelStyle.Mat.DARK)
+	grabs.add_zip(ZIP_HIGH, ZIP_LOW)
+
+
+func _wall_at(x: float, z: float, h: float) -> Array:
+	return [Vector3(x, h * 0.5, z), Vector3(LANE, h, 0.5), true, 0.0, 0.0]
 
 
 ## 主ルートを横切る薄い壁
@@ -90,5 +119,9 @@ func _build() -> void:
 			flags = LevelGeometry.NO_VISUAL
 		var mat := LevelStyle.Mat.ROUTE if b[2] else LevelStyle.Mat.WHITE
 		geo.add_box(b[0], b[1], mat, Vector3(b[4], b[3], 0.0), flags)
+	var grabs := GrabLines.new()
+	grabs.name = "GrabLines"
+	_lines(geo, grabs)
 	geo.build()
 	add_child(geo)
+	add_child(grabs)

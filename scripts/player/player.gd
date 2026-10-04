@@ -2,6 +2,8 @@ class_name Player
 extends CharacterBody3D
 ## 1人称パルクールの動き（仕様書 3章）。
 ## 走り・ジャンプ・ヴォルト・クライム・レッジグラブ・ウォールラン（横/縦）・壁ジャンプ・スライド・ローリング・ハードランディング。
+## 1.1 で追加（近道を開拓する技）：ウォールキック（空中で壁を蹴る）・ヴォルトジャンプ（障害物の上から跳ぶ）・
+## スイングバー（横棒で振り子）・ジップライン（斜めの線を滑り降りる）・ぶら下がりからの後ろ跳び。
 ## 速度計算は全部自前で行い、move_and_slide() は衝突処理だけに使う。
 ## 演出（カメラ・体・振動）はここでは行わず、シグナルと公開している状態を各層が読む。
 ##
@@ -22,15 +24,23 @@ signal ledge_grabbed
 signal wallrun_started
 signal wall_jumped
 signal slide_started
+## 空中で壁を蹴った（ウォールキック）
+signal wall_kicked
+## ヴォルトの途中で障害物の上から跳んだ
+signal vault_jumped
+signal swing_started
+signal zip_started
 ## 壁に正面からぶつかった。speed = 壁に向かっていた速度 m/s
 signal crashed(speed: float)
 ## Perfect判定。kind = &"landing_jump" / &"roll" / &"vault" / &"wall_jump" / &"slide_jump"
+## / &"wall_kick" / &"vault_jump" / &"swing" / &"zip"
 signal perfect(kind: StringName)
 signal quick_turned
 ## リトライ・チェックポイント復帰・落下で戻った。to_start = スタート地点へ戻った（計測をやり直す）
 signal respawned(to_start: bool)
 
-enum State { GROUND, AIR, VAULT, ROLL, HARD_LAND, CLIMB, LEDGE_HANG, WALL_RUN, WALL_CLIMB, SLIDE }
+## 記録（ゴースト）に番号で残るので、足す時は最後に足す
+enum State { GROUND, AIR, VAULT, ROLL, HARD_LAND, CLIMB, LEDGE_HANG, WALL_RUN, WALL_CLIMB, SLIDE, SWING, ZIPLINE }
 
 const TUNED_PATH := "user://movement_tuned.tres"
 const CRASH_SPEED := 5.0      ## m/s。これより速く壁に当たると激突
@@ -39,6 +49,18 @@ const HANG_DROP := 1.9        ## m。ぶら下がり中、縁から足元まで
 const WALL_DETECT := 0.45     ## m。体の表面から壁までの検出距離
 const WALL_COOLDOWN := 0.35   ## s。離れた直後の同じ壁には張り付かない
 const RETRY_HOLD := 0.3       ## s。リトライをこれだけ押し続けるとチェックポイントへ（仕様書 5章）
+const EYE_HEIGHT := 1.65      ## m。足元から目まで（EyeAnchor）
+const EYE_SMOOTH := 0.05      ## s。目の位置が姿勢の目標へ追いつく時定数（掴んだ瞬間の跳ねを消す）
+const KICK_CONTACT := 0.06    ## m。体の表面から壁までこれ以下なら「触れた」（ウォールキックのPerfectの基準）
+const GRAB_LO := 1.25         ## m。足元からこの高さ〜GRAB_HI の棒・線に手が届く（空中）
+const GRAB_HI := 2.35
+const GRAB_COOLDOWN := 0.35   ## s。離した直後の同じ棒・線は掴まない
+const SWING_COM := 0.9        ## m。足元から重心まで（スイングの振り子の先）
+const GRIP_EYE_BACK := 0.85   ## m。スイング・ジップライン中、目を握る所のこれだけ後ろに置く（握った手とバーが画面の上に見える）
+const GRIP_EYE_DOWN := 0.4    ## m。同じく下
+const SWING_EYE_ARC := 0.15   ## m。スイングの振れに合わせて目が回る半径（大きいと酔う）
+const ZIP_HANG := 2.0         ## m。ジップラインの線から足元まで
+const ZIP_END := 0.6          ## m。線の終点のこれだけ手前で自動で離す
 
 @export var params: MovementParams
 
@@ -70,6 +92,8 @@ var input_enabled: bool = true
 var floor_surface: StringName = &"concrete"
 ## 今ジャンプすると出る技（照準点が広がる：仕様書 8章）。&"" = 普通のジャンプ
 var move_hint: StringName = &""
+## スイング中の振れ角（ラジアン。0 = 真下、+ = 前へ振り上がる）。カメラ・脚が読む
+var swing_angle: float = 0.0
 
 var _since_floor: float = 0.0
 var _since_jump_press: float = INF
@@ -93,10 +117,44 @@ var _clock: float = 0.0
 var _land_clock: float = -INF
 var _jump_press_clock: float = -INF
 var _vault_perfect: bool = false
+## ヴォルト・クライムを始めた時刻（ヴォルトジャンプのPerfectの基準）
+var _move_clock0: float = 0.0
+## ウォールキック：この空中で蹴った回数、壁に触れた時刻、最後に蹴った壁の法線（同じ壁は続けて蹴れない）
+var _kicks: int = 0
+var _kick_contact_clock: float = -INF
+var _last_kick_normal: Vector3 = Vector3.ZERO
+## 縦ウォールランから蹴り上がった：次によじ登る時は駆け込んだ速さで登りきる
+var _climb_carry: bool = false
+## 掴んでいる棒・線（GrabLines の何番目か）と、離した直後に掴み直さない時間
+var _line_owner: GrabLines
+var _line_index: int = -1
+var _grab_cooldown: float = 0.0
+## スイング：バーの点、振る向き（水平・単位）、角速度、飛び込んだ勢いの倍率、理想の角度を越えた時刻
+var _swing_pivot: Vector3 = Vector3.ZERO
+var _swing_f: Vector3 = Vector3.FORWARD
+var _swing_omega: float = 0.0
+var _swing_scale: float = 1.0
+var _swing_cross_clock: float = -INF
+## 飛び込んだ時の水平の速さ。理想の角度までに離せば、これを保って飛ぶ（振り返すたびに減る）
+var _swing_ref: float = 0.0
+## 振る先が塞がっていたフレーム数（続いたら手を放す）
+var _swing_blocked: int = 0
+## コースの GrabLines の一覧と、探したフレーム
+var _grab_cache: Array[GrabLines] = []
+var _grab_cache_frame: int = -1000
+## ジップライン：高い端、下る向き（単位）、長さ、高い端からの距離、速さ
+var _zip_a: Vector3 = Vector3.ZERO
+var _zip_u: Vector3 = Vector3.FORWARD
+var _zip_len: float = 0.0
+var _zip_d: float = 0.0
+var _zip_speed: float = 0.0
+## 足元から目までのワールド座標の差（ふだんは真上 EYE_HEIGHT。スイング中はバーの近く）
+var _eye_off: Vector3 = Vector3.UP * EYE_HEIGHT
 
 @onready var rig: CameraRig = $CameraRig
 @onready var _shape_node: CollisionShape3D = $CollisionShape3D
 @onready var _capsule: CapsuleShape3D = _shape_node.shape
+@onready var _eye: Node3D = $EyeAnchor
 
 
 func _ready() -> void:
@@ -116,6 +174,9 @@ func _ready() -> void:
 	hard_landed.connect(func(_drop: float) -> void: Haptics.hard_land())
 	ledge_grabbed.connect(Haptics.grab)
 	climb_started.connect(Haptics.grab)
+	swing_started.connect(Haptics.grab)
+	zip_started.connect(Haptics.grab)
+	wall_kicked.connect(func() -> void: Haptics.pulse(0.15, 0.4, 50.0))
 	rig.snap(rotation.y)
 
 
@@ -131,6 +192,7 @@ func _physics_process(delta: float) -> void:
 	_since_jump_press = 0.0 if _just(&"jump") else _since_jump_press + delta
 	_since_crouch_press = 0.0 if _just(&"crouch") else _since_crouch_press + delta
 	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
+	_grab_cooldown = maxf(_grab_cooldown - delta, 0.0)
 	state_time += delta
 	braking = false
 	if _just(&"quick_turn"):
@@ -157,6 +219,11 @@ func _physics_process(delta: float) -> void:
 			_wall_climb(delta)
 		State.SLIDE:
 			_slide(delta)
+		State.SWING:
+			_swing(delta)
+		State.ZIPLINE:
+			_zipline(delta)
+	_update_eye(delta)
 	_update_stride(delta)
 	_update_momentum(delta)
 	_continuous_haptics()
@@ -189,9 +256,19 @@ func respawn(at: Transform3D = spawn) -> void:
 	perfect_count = 0
 	braking = false
 	_land_clock = -INF
+	_grab_cooldown = 0.0
+	_line_owner = null
+	_line_index = -1
+	_kicks = 0
+	_last_kick_normal = Vector3.ZERO
+	_kick_contact_clock = -INF
+	_climb_carry = false
 	_set_height(STAND_HEIGHT)
 	_set_state(State.AIR)
+	_eye_off = Vector3.UP * EYE_HEIGHT
+	_eye.position = _eye_off
 	reset_physics_interpolation()
+	_eye.reset_physics_interpolation()
 	rig.snap(at.basis.get_euler().y)
 	respawned.emit(to_start)
 
@@ -275,7 +352,7 @@ func _air(delta: float) -> void:
 	if _jumped and not _jump_cut_done and velocity.y > 0.0 and not _held(&"jump"):
 		velocity.y *= 1.0 - params.jump_cut_max
 		_jump_cut_done = true
-	if _try_ledge_from_air() or _try_wall_run() or _try_wall_climb_from_air():
+	if _try_ledge_from_air() or _try_grab_line() or _try_wall_run() or _try_wall_climb_from_air() or _try_wall_kick(delta):
 		return
 	_move(delta, false)
 	_air_peak_y = maxf(_air_peak_y, global_position.y)
@@ -287,6 +364,8 @@ func _vault(delta: float) -> void:
 	var v := move
 	move_progress = clampf(state_time / _move_duration, 0.0, 1.0)
 	var d := v.back_dist * move_progress
+	if _try_vault_jump(v, d, delta):
+		return
 	var pos := v.start + v.dir * d
 	pos.y = _vault_height(v, d)
 	_teleport(pos, delta)
@@ -319,6 +398,10 @@ func _climb(delta: float) -> void:
 func _ledge_hang(_delta: float) -> void:
 	velocity = Vector3.ZERO
 	var input := _move_input()
+	if _since_jump_press <= params.move_buffer and _look_dir().dot(move.dir) < -0.3:
+		# 壁に背を向けて（視線を後ろへ回して）ジャンプ：壁を蹴って視線の向きへ跳ぶ
+		_back_kick(-move.dir, _look_dir())
+		return
 	if _since_jump_press <= params.move_buffer or input.y < -0.6:
 		_start_climb(move)
 		return
@@ -363,17 +446,15 @@ func _wall_run(delta: float) -> void:
 		_land()
 
 
-## 縦のウォールラン：壁に正対して駆け上がる。届けば縁を掴む
+## 縦のウォールラン：壁に正対して駆け上がる。届けば縁を掴む。
+## 途中でジャンプ：壁の方へ倒していれば壁を蹴ってもう一伸び（駆け上がりの頂点で押すとPerfect）、
+## 倒していなければ壁を蹴って後ろへ
 func _wall_climb(delta: float) -> void:
 	if _since_jump_press <= params.move_buffer and state_time > 0.1:
-		# 壁を蹴って後ろへ
-		velocity = wall_normal * params.run_speed * 0.6 + Vector3.UP * params.jump_velocity() * 0.8
-		_since_jump_press = INF
-		_wall_cooldown = WALL_COOLDOWN
-		_last_wall_normal = wall_normal
-		_leave_ground()
-		_jumped = true
-		wall_jumped.emit()
+		if _desired_velocity().dot(-wall_normal) > 0.3 * params.run_speed:
+			_climb_kick(delta)
+		else:
+			_back_kick(wall_normal, wall_normal)  # 壁を蹴って後ろへ
 		return
 	var r := VaultProbe.ledge(self, -wall_normal, WALL_DETECT, 0.4, params.ledge_reach, 20.0, _capsule.radius, STAND_HEIGHT)
 	if r != null:
@@ -409,7 +490,7 @@ func _slide(delta: float) -> void:
 	if braking:
 		h = h.move_toward(Vector3.ZERO, params.brake_decel * 0.6 * delta)
 	elif want != Vector3.ZERO and h.length() > 0.1:
-		h = h.slerp(want.normalized() * h.length(), minf(1.0, 1.5 * delta))
+		h = _turn_toward(h, want, minf(1.0, 1.5 * delta))
 	h = h.limit_length(params.max_flow_speed)
 	velocity = Vector3(h.x, minf(velocity.y, 0.0), h.z)
 
@@ -443,7 +524,7 @@ func _roll(delta: float) -> void:
 	var spd := h.length()
 	var want := _desired_velocity()
 	if want != Vector3.ZERO and spd > 0.1:
-		h = h.slerp(want.normalized() * spd, minf(1.0, 2.0 * delta))
+		h = _turn_toward(h, want, minf(1.0, 2.0 * delta))
 	velocity = Vector3(h.x, minf(velocity.y, 0.0), h.z)
 	_move(delta, true)
 	var t := state_time / params.roll_duration
@@ -474,6 +555,11 @@ func _hard_land(delta: float) -> void:
 func _set_state(s: State) -> void:
 	state = s
 	state_time = 0.0
+	if s != State.AIR:
+		_kicks = 0
+		_kick_contact_clock = -INF
+		if s != State.CLIMB:
+			_climb_carry = false
 
 
 ## 地上でジャンプを押した時の優先順：ヴォルト → クライム → 縦ウォールラン（どれも無理ならfalse）
@@ -566,6 +652,7 @@ func _try_vault() -> bool:
 			params.vault_min_duration, params.vault_max_duration)
 	_since_jump_press = INF
 	_pending_time = -1.0
+	_move_clock0 = _clock
 	_add_momentum(params.momentum_gain_move)
 	_set_state(State.VAULT)
 	vault_started.emit()
@@ -593,8 +680,9 @@ func _start_climb(r: VaultProbe.Result) -> void:
 	move = r
 	move_progress = 0.0
 	move.start = global_position
-	# 縦ウォールランから登る時は、壁に押し付けている速さ（約1 m/s）ではなく駆け込んだ速さで登りきる
-	_move_speed_in = _wall_climb_speed_in if state == State.WALL_CLIMB else horizontal_speed()
+	# 縦ウォールランから登る時（蹴り上がった後も）は、壁に押し付けている速さ（約1 m/s）ではなく駆け込んだ速さで登りきる
+	_move_speed_in = _wall_climb_speed_in if state == State.WALL_CLIMB or _climb_carry else horizontal_speed()
+	_climb_carry = false
 	var k := clampf(_move_speed_in / params.run_speed, 0.0, 1.0)
 	_move_duration = params.climb_time * lerpf(1.0, params.climb_fast_mult, k)
 	# 前面との距離を測り直す（ぶら下がりや縦ウォールランから来た時は start が変わっている）
@@ -752,6 +840,408 @@ func _drop_from_wall(push: Vector3) -> void:
 	move = null
 	_leave_ground()
 	_jumped = true
+
+
+## 壁を蹴って away（壁から離れる向き）へ跳ぶ。縦ウォールラン中・ぶら下がり中の後ろ跳び。
+## look = 跳ぶ向き（ぶら下がりで視線を後ろへ回した時はその向き）。wall_n = 蹴った壁の法線
+func _back_kick(wall_n: Vector3, look: Vector3) -> void:
+	var out := look
+	out.y = 0.0
+	out = out.normalized() if out.length() > 0.1 else wall_n
+	if out.dot(wall_n) < 0.2:
+		out = (out + wall_n).normalized()  # 壁へ向かっては跳べない
+	velocity = out * params.run_speed * 0.6 + Vector3.UP * params.jump_velocity() * 0.8
+	_since_jump_press = INF
+	_wall_cooldown = WALL_COOLDOWN
+	_last_wall_normal = wall_n
+	move = null
+	_leave_ground()
+	_jumped = true
+	wall_jumped.emit()
+
+
+# --- 1.1 の技：ウォールキック・ヴォルトジャンプ・スイングバー・ジップライン ---------------
+
+## ウォールキック（tic-tac）：空中で壁に触れた瞬間にジャンプ。上へ伸び、壁から離れる向きへ跳ね返る。
+## 浅い角度で速い時は横ウォールランが自動で先に始まるので、これは深い角度・遅い時・正面の壁で出る。
+## 壁の方へ倒したまま蹴ると上へ伸びる（縁に手が届く）。倒していなければ跳ね返る（向かいの壁へ）。
+## 1回の空中で wall_kick_max 回まで、同じ壁は続けて蹴れない（向かい合う壁を交互に蹴れば登れる）。
+## 縦ウォールラン・横ウォールランが終わった壁は蹴れる（もう一伸び）。壁に触れた瞬間（±perfect_window）に押すとPerfect
+func _try_wall_kick(delta: float) -> bool:
+	var wall := _find_kick_wall()
+	if wall.is_empty():
+		_kick_contact_clock = -INF
+		return false
+	var n: Vector3 = wall.normal
+	var gap := float(wall.dist) - _capsule.radius
+	if gap <= KICK_CONTACT:
+		if _kick_contact_clock == -INF:
+			_kick_contact_clock = _clock
+	else:
+		_kick_contact_clock = -INF
+	if _since_jump_press > params.move_buffer or _kicks >= params.wall_kick_max:
+		return false
+	if _kicks > 0 and n.dot(_last_kick_normal) > 0.9:
+		return false
+	# 着地の直前（ジャンプの先行入力が着地で効く間に落ちる高さ）の押しは、着地のジャンプに回す
+	if velocity.y < 0.0 and VaultProbe.floor_below(self, maxf(0.35, -velocity.y * params.jump_buffer + 0.25)):
+		return false
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var nd := h.dot(n)
+	# 触れた時刻：もう触れていればその時刻、向かっていれば届く時刻の見込み
+	var contact := _kick_contact_clock
+	if contact == -INF:
+		contact = _clock + gap / -nd if nd < -0.5 else INF
+	var perfect := absf(_jump_press_clock - contact) <= params.perfect_window
+	var along := h - n * nd
+	var push := clampf(absf(nd), params.wall_kick_push_min, params.wall_kick_push_max)
+	var kick_up := _desired_velocity().dot(-n) > 0.3 * params.run_speed
+	if kick_up:
+		push = params.wall_kick_push_up  # 壁の方へ倒している：上へ伸びる
+	var out := _boost(along + n * push, params.perfect_speed_bonus if perfect else 0.0)
+	var up := params.wall_kick_up * pow(params.wall_kick_chain_mult, _kicks)
+	var kicks := _kicks + 1
+	velocity = Vector3(out.x, maxf(velocity.y, up), out.z)
+	wall_normal = n
+	_since_jump_press = INF
+	if not kick_up:
+		# 跳ね返った壁にすぐ張り付かない（蹴り上がった時はその壁の縁を掴みたいので止めない）
+		_wall_cooldown = WALL_COOLDOWN
+		_last_wall_normal = n
+	_last_kick_normal = n
+	_add_momentum(params.momentum_gain_small)
+	_leave_ground()
+	_kicks = kicks
+	_jumped = true
+	_jump_cut_done = true
+	wall_kicked.emit()
+	if perfect:
+		_apply_perfect(&"wall_kick", false)
+	_move(delta, false, false)
+	return true
+
+
+## 縦ウォールランの途中で壁を蹴り上がる（ウォールキックの1回目として数える）。頂点（上向きの速さが0になる時）が理想
+func _climb_kick(delta: float) -> void:
+	var apex := _clock + maxf(velocity.y, 0.0) / params.gravity()
+	var perfect := absf(_jump_press_clock - apex) <= params.perfect_window
+	var n := wall_normal
+	velocity = Vector3(n.x * params.wall_kick_push_up, maxf(velocity.y, params.wall_kick_up), n.z * params.wall_kick_push_up)
+	_since_jump_press = INF
+	_last_kick_normal = n
+	_add_momentum(params.momentum_gain_small)
+	_leave_ground()
+	_kicks = 1
+	_climb_carry = true
+	_jumped = true
+	_jump_cut_done = true
+	wall_kicked.emit()
+	if perfect:
+		_apply_perfect(&"wall_kick", false)
+	_move(delta, false, false)
+
+
+## 蹴れる壁：進む向き・その左右45°/90°・視線の向きに、胸の高さで体の表面から wall_kick_reach 以内
+func _find_kick_wall() -> Dictionary:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var base := h.normalized() if h.length() > 1.0 else _facing()
+	var dirs: Array[Vector3] = [base, _look_dir()]
+	for deg: float in [45.0, -45.0, 90.0, -90.0]:
+		dirs.append(Basis(Vector3.UP, deg_to_rad(deg)) * base)
+	var wall := VaultProbe.nearest_wall(self, dirs, _capsule.radius + params.wall_kick_reach + 0.05)
+	if wall.is_empty() or float(wall.dist) - _capsule.radius > params.wall_kick_reach:
+		return {}
+	return wall
+
+
+## ヴォルトジャンプ：障害物の上にいる間（手で押し切る前後）にジャンプを押し直すと、上から跳ぶ。
+## 地面から跳ぶより高い所から、速度を上乗せして跳ぶので、障害物のすぐ先の大きな隙間を越えられる。
+## 手で押し切る瞬間（体が障害物の奥の面を越える時：±perfect_window）に押すとPerfect
+func _try_vault_jump(v: VaultProbe.Result, d: float, delta: float) -> bool:
+	if v.onto or _since_jump_press > params.move_buffer or _since_jump_press >= state_time:
+		return false
+	if d < v.front_dist - 0.1 or d > v.back_face + _capsule.radius:
+		return false
+	var t_push := _move_clock0 + _move_duration * (v.back_face / maxf(v.back_dist, 0.01))
+	var perfect := absf(_jump_press_clock - t_push) <= params.perfect_window
+	var bonus := params.vault_jump_bonus + (params.perfect_speed_bonus if perfect else 0.0)
+	var out := _boost(v.dir * maxf(_move_speed_in, params.walk_speed), bonus)
+	velocity = Vector3(out.x, 0.0, out.z)
+	move = null
+	_jump()
+	velocity.y = params.jump_velocity() * params.vault_jump_lift
+	vault_jumped.emit()
+	if perfect:
+		_apply_perfect(&"vault_jump", false)
+	_move(delta, false)
+	return true
+
+
+## 空中で手の届くスイングバー・ジップラインを掴む
+func _try_grab_line() -> bool:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var dir := h.normalized() if h.length() > 0.5 else _facing()
+	var skip := _line_index if _grab_cooldown > 0.0 else -1
+	var r := GrabLines.find_in(_grab_nodes(), global_position, dir, params.swing_reach, params.zip_reach,
+			GRAB_LO, GRAB_HI, _line_owner, skip)
+	if r.is_empty():
+		return false
+	if int(r.kind) == GrabLines.Kind.BAR:
+		if not _start_swing(r, dir):
+			return false
+	else:
+		_start_zip(r)
+	_line_owner = r.owner
+	_line_index = r.index
+	return true
+
+
+## コースの GrabLines（1秒ごとに探し直す。毎フレーム木を探さない）
+func _grab_nodes() -> Array[GrabLines]:
+	var frame := Engine.get_physics_frames()
+	if frame - _grab_cache_frame > 60 or _grab_cache.any(func(g: GrabLines) -> bool: return not is_instance_valid(g)):
+		_grab_cache = GrabLines.all(get_tree())
+		_grab_cache_frame = frame
+	return _grab_cache
+
+
+## スイング：バーを支点に、重心が半径 swing_radius の円を描く振り子。
+## 速く飛び込んだ分は振れ幅の上限（swing_max_angle）で抑え、倍率として覚えて離す時に返す（勢いを失わない）。
+## 振れる向きに倒すとこげる、何も倒さないと少しずつ減る。振る場所が壁などで塞がっていれば掴まない（false）
+func _start_swing(r: Dictionary, dir: Vector3) -> bool:
+	var line: Dictionary = (r.owner as GrabLines).lines[int(r.index)]
+	var u := ((line.b as Vector3) - (line.a as Vector3)).normalized()
+	var f := dir - u * dir.dot(u)
+	f.y = 0.0
+	f = f.normalized()
+	var radius := params.swing_radius
+	var g := params.gravity()
+	var pivot: Vector3 = r.point
+	var rel := global_position + Vector3.UP * SWING_COM - pivot
+	var theta := clampf(asin(clampf(rel.dot(f) / radius, -0.95, 0.95)), deg_to_rad(-55.0), deg_to_rad(40.0))
+	_swing_pivot = pivot
+	_swing_f = f
+	var feet := _swing_feet(theta)
+	if test_move(global_transform, feet - global_position):
+		return false
+	var t_hat := f * cos(theta) + Vector3.UP * sin(theta)
+	var v_t := velocity.dot(t_hat)
+	var th_max := deg_to_rad(params.swing_max_angle)
+	var cap := sqrt(maxf(2.0 * g * (cos(theta) - cos(th_max)) / radius, 0.0))
+	var v_bottom := sqrt(2.0 * g * radius * (1.0 - cos(th_max)))
+	_swing_scale = maxf(1.0, maxf(horizontal_speed(), absf(v_t)) / v_bottom)
+	_swing_ref = horizontal_speed()
+	_swing_omega = clampf(v_t / radius, -cap, cap)
+	_swing_cross_clock = -INF
+	_swing_blocked = 0
+	swing_angle = theta
+	move = _grip(pivot, f)
+	_since_jump_press = INF
+	_pending_time = -1.0
+	_add_momentum(params.momentum_gain_move)
+	_set_state(State.SWING)
+	_snap_body(feet)
+	velocity = t_hat * _swing_omega * radius
+	swing_started.emit()
+	return true
+
+
+func _swing(delta: float) -> void:
+	if _since_jump_press <= params.move_buffer and _since_jump_press < state_time:
+		_release_swing(true)
+		return
+	if _just(&"crouch"):
+		_release_swing(false)
+		return
+	var radius := params.swing_radius
+	var g := params.gravity()
+	var th_max := deg_to_rad(params.swing_max_angle)
+	var alpha := -(g / radius) * sin(swing_angle) - params.swing_damping * _swing_omega
+	# こぐ：振れている向きに倒す
+	var push := _desired_velocity().dot(_swing_f) / params.run_speed
+	if (push > 0.3 and _swing_omega > 0.0) or (push < -0.3 and _swing_omega < 0.0):
+		alpha += signf(_swing_omega) * params.swing_pump
+	var omega := _swing_omega + alpha * delta
+	var theta := clampf(swing_angle + omega * delta, -th_max, th_max)
+	var cap := sqrt(maxf(2.0 * g * (cos(theta) - cos(th_max)) / radius, 0.0))
+	if absf(omega) > cap:
+		omega = signf(omega) * cap
+	if _swing_omega != 0.0 and omega * _swing_omega <= 0.0:
+		# 折り返すたびに飛び込んだ勢いが抜けていく
+		_swing_scale = lerpf(_swing_scale, 1.0, 0.5)
+		_swing_ref *= 0.6
+	# Perfectの基準：振り上がって理想の角度を越えた時刻（フレームの途中を補間）
+	var ideal := deg_to_rad(params.swing_ideal_angle)
+	if absf(theta) < ideal:
+		_swing_cross_clock = -INF
+	elif absf(swing_angle) < ideal and theta * omega > 0.0:
+		var k := (ideal - absf(swing_angle)) / maxf(absf(theta) - absf(swing_angle), 1e-4)
+		_swing_cross_clock = _clock - delta + delta * k
+	var feet := _swing_feet(theta)
+	if test_move(global_transform, feet - global_position):
+		# 何かに当たった：跳ね返る。続けて塞がっていれば手を放す（空中で固まらない）
+		_swing_omega = -_swing_omega * 0.3
+		velocity = Vector3.ZERO
+		_swing_blocked += 1
+		if _swing_blocked >= 6:
+			_release_swing(false)
+		return
+	_swing_blocked = 0
+	_swing_omega = omega
+	swing_angle = theta
+	_teleport(feet, delta)
+
+
+func _swing_feet(theta: float) -> Vector3:
+	var radius := params.swing_radius
+	return _swing_pivot + (_swing_f * sin(theta) - Vector3.UP * cos(theta)) * radius - Vector3.UP * SWING_COM
+
+
+## 理想の角度（振り上がる途中の swing_ideal_angle）を通る時刻と押した時刻のずれで判定
+func _swing_perfect() -> bool:
+	var ideal := deg_to_rad(params.swing_ideal_angle)
+	var t_cross := _swing_cross_clock
+	if absf(swing_angle) < ideal and swing_angle * _swing_omega >= 0.0 and absf(_swing_omega) > 0.1:
+		t_cross = _clock + (ideal - absf(swing_angle)) / absf(_swing_omega)
+	return absf(_jump_press_clock - t_cross) <= params.perfect_window
+
+
+## jump = ジャンプで離す（上乗せ・上向き）、false = しゃがみで手を放す。
+## 振り上がる途中、理想の角度までに離すと飛び込んだ水平の速さを保つ（早い = 低く速く、理想 = 速く高く、遅い = 高く遅く）
+func _release_swing(jump: bool) -> void:
+	var t_hat := _swing_f * cos(swing_angle) + Vector3.UP * sin(swing_angle)
+	var v := t_hat * _swing_omega * params.swing_radius * _swing_scale
+	var perfect := jump and _swing_perfect()
+	if jump:
+		var h := Vector3(v.x, 0.0, v.z)
+		# 理想の角度（Perfectの幅を含む）までは飛び込んだ速さを保ち、そこから25°かけて振り子の速さに戻る
+		var keep_to := deg_to_rad(params.swing_ideal_angle) + absf(_swing_omega) * params.perfect_window
+		var keep := 1.0 - clampf((absf(swing_angle) - keep_to) / deg_to_rad(25.0), 0.0, 1.0)
+		if swing_angle * _swing_omega > 0.0 and h.length() > 0.1:
+			h = h.normalized() * maxf(h.length(), _swing_ref * keep)
+		var bonus := params.swing_release_bonus + (params.perfect_speed_bonus if perfect else 0.0)
+		h = _boost(h, bonus)
+		v = Vector3(h.x, v.y + params.swing_release_lift, h.z)
+	velocity = v
+	_end_grab(jump)
+	if perfect:
+		_apply_perfect(&"swing", false)
+
+
+## ジップライン：高い端から低い端へ、重力の線方向の成分で加速して滑る（上限 zip_max_speed）。
+## 終点の ZIP_END 手前で自動で離す。終点の zip_ideal_time 前（±perfect_window）にジャンプで離すとPerfect
+func _start_zip(r: Dictionary) -> void:
+	var line: Dictionary = (r.owner as GrabLines).lines[int(r.index)]
+	_zip_a = line.a
+	var ab := (line.b as Vector3) - _zip_a
+	_zip_len = ab.length()
+	_zip_u = ab / _zip_len
+	_zip_d = r.d
+	_zip_speed = clampf(maxf(velocity.dot(_zip_u), horizontal_speed() * 0.6), 2.0, params.zip_max_speed)
+	var grip: Vector3 = r.point
+	# 指先は線を横切る向き（両手が線に沿って前後に並ぶ）
+	move = _grip(grip, Vector3(_zip_u.x, 0.0, _zip_u.z).normalized().cross(Vector3.UP))
+	_since_jump_press = INF
+	_pending_time = -1.0
+	_add_momentum(params.momentum_gain_small)
+	_set_state(State.ZIPLINE)
+	var feet := grip - Vector3.UP * ZIP_HANG
+	if not test_move(global_transform, feet - global_position):
+		_snap_body(feet)
+	velocity = _zip_u * _zip_speed
+	zip_started.emit()
+
+
+func _zipline(delta: float) -> void:
+	if _since_jump_press <= params.move_buffer and _since_jump_press < state_time:
+		_release_zip(true)
+		return
+	if _just(&"crouch"):
+		_release_zip(false)
+		return
+	var acc := params.gravity() * -_zip_u.y - params.zip_friction
+	_zip_speed = clampf(_zip_speed + acc * delta, 0.0, params.zip_max_speed)
+	_zip_d += _zip_speed * delta
+	if _zip_d >= _zip_len - ZIP_END:
+		_zip_d = _zip_len - ZIP_END
+		_release_zip(false)
+		return
+	var grip := _zip_a + _zip_u * _zip_d
+	var feet := grip - Vector3.UP * ZIP_HANG
+	if test_move(global_transform, feet - global_position):
+		_release_zip(false)
+		return
+	_teleport(feet, delta)
+	move.hand = grip
+
+
+func zip_remaining_time() -> float:
+	return (_zip_len - ZIP_END - _zip_d) / maxf(_zip_speed, 0.1)
+
+
+func _release_zip(jump: bool) -> void:
+	var v := _zip_u * _zip_speed
+	var perfect := false
+	if jump:
+		perfect = absf(zip_remaining_time() - params.zip_ideal_time) <= params.perfect_window
+		var h := Vector3(v.x, 0.0, v.z)
+		if perfect:
+			h = _boost(h, params.perfect_speed_bonus)
+		v = Vector3(h.x, maxf(v.y, 0.0) + params.zip_release_up, h.z)
+	velocity = v
+	_end_grab(jump)
+	if perfect:
+		_apply_perfect(&"zip", false)
+
+
+func _end_grab(jump: bool) -> void:
+	move = null
+	_grab_cooldown = GRAB_COOLDOWN
+	_leave_ground()
+	_jumped = true
+	_jump_cut_done = true
+	if jump:
+		_since_jump_press = INF
+		jumped.emit()
+
+
+## 手を掛ける所（手の層が両手を置く）。dir = 指先の向き
+func _grip(hand: Vector3, dir: Vector3) -> VaultProbe.Result:
+	var r := VaultProbe.Result.new()
+	r.start = global_position
+	r.hand = hand
+	r.dir = dir
+	r.top_y = hand.y
+	r.land = global_position
+	r.onto = true
+	return r
+
+
+## 体を瞬間移動させる。目の位置はその瞬間のまま残し、_update_eye が姿勢の目標へなめらかに寄せる
+func _snap_body(feet: Vector3) -> void:
+	_eye_off += global_position - feet
+	global_position = feet
+
+
+## 目の位置：ふだんは足元の真上 EYE_HEIGHT。
+## スイング・ジップライン中は握る所の少し後ろ下（バー・線と握った手が画面の上に見える：手が見えた瞬間が「掴んだ」確信）。
+## スイングでは振れに合わせて小さく回る
+func _update_eye(delta: float) -> void:
+	var target := Vector3.UP * EYE_HEIGHT
+	if state == State.SWING:
+		var arm := _swing_f * sin(swing_angle) - Vector3.UP * cos(swing_angle)
+		var eye := _swing_pivot - _swing_f * GRIP_EYE_BACK - Vector3.UP * GRIP_EYE_DOWN + (arm + Vector3.UP) * SWING_EYE_ARC
+		target = eye - global_position
+	elif state == State.ZIPLINE and move != null:
+		var back := Vector3(_zip_u.x, 0.0, _zip_u.z).normalized()
+		target = (move.hand - back * GRIP_EYE_BACK - Vector3.UP * GRIP_EYE_DOWN) - global_position
+	_eye_off = _eye_off.lerp(target, 1.0 - exp(-delta / EYE_SMOOTH))
+	_eye.global_position = global_position + _eye_off
+
+
+## 視線の水平の向き
+func _look_dir() -> Vector3:
+	return Basis(Vector3.UP, rig.move_yaw()) * Vector3.FORWARD
 
 
 func _try_slide() -> bool:
@@ -924,9 +1414,20 @@ func _steer(h: Vector3, target: Vector3, control: float, delta: float) -> Vector
 		var new_spd := spd
 		if grounded:
 			new_spd = maxf(spd - params.overspeed_decay * (1.0 - 0.5 * momentum) * delta, params.run_speed)
-		var turned := h.normalized().slerp(target.normalized(), minf(1.0, 6.0 * control * delta))
+		var turned := _turn_toward(h.normalized(), target, minf(1.0, 6.0 * control * delta))
 		return _soft_cap(turned * new_spd, delta)
 	return h.move_toward(target, params.run_speed / params.accel_time * control * delta)
+
+
+## 水平の速度 h の向きを to の向きへ weight の割合だけ回す（長さは保つ）。
+## Vector3.slerp と同じ結果だが、ほぼ平行な時に回転軸の長さが1からずれてエラーになるのを避ける
+static func _turn_toward(h: Vector3, to: Vector3, weight: float) -> Vector3:
+	var a := Vector2(h.x, h.z)
+	var b := Vector2(to.x, to.z)
+	if a.length_squared() < 1e-8 or b.length_squared() < 1e-8:
+		return h
+	var r := a.rotated(a.angle_to(b) * weight)
+	return Vector3(r.x, h.y, r.y)
 
 
 ## 上限を超えていたら少しずつ上限まで戻す（勢いを失った瞬間に速度が飛ばないように）
@@ -971,9 +1472,18 @@ func _update_move_hint() -> void:
 				move_hint = &"wall_climb"
 		State.AIR:
 			var h := Vector3(velocity.x, 0.0, velocity.z)
-			if h.length() >= params.wallrun_min_speed and not VaultProbe.side_wall(self, h.normalized(), _capsule.radius + 1.2).is_empty():
+			var dir := h.normalized() if h.length() > 0.5 else _facing()
+			if h.length() >= params.wallrun_min_speed and not VaultProbe.side_wall(self, dir, _capsule.radius + 1.2).is_empty():
 				move_hint = &"wall_run"
-		State.WALL_RUN, State.LEDGE_HANG, State.WALL_CLIMB:
+			elif not GrabLines.find_in(_grab_nodes(), global_position + dir * 0.6, dir, params.swing_reach * 2.0,
+					params.zip_reach * 2.0, GRAB_LO - 0.6, GRAB_HI + 0.8, null, -1).is_empty():
+				move_hint = &"grab"
+			elif _kicks < params.wall_kick_max and not _find_kick_wall().is_empty():
+				move_hint = &"kick"
+		State.VAULT:
+			if move != null and not move.onto:
+				move_hint = &"vault_jump"
+		State.WALL_RUN, State.LEDGE_HANG, State.WALL_CLIMB, State.SWING, State.ZIPLINE:
 			move_hint = &"jump"
 
 
@@ -994,12 +1504,10 @@ func _quick_turn() -> void:
 				_set_state(State.GROUND)
 		State.WALL_CLIMB:
 			# 駆け上がりの途中で振り向いて、壁を蹴って後ろへ
-			velocity = wall_normal * params.run_speed * 0.6 + Vector3.UP * params.jump_velocity() * 0.8
-			_wall_cooldown = WALL_COOLDOWN
-			_last_wall_normal = wall_normal
-			_leave_ground()
-			_jumped = true
-			wall_jumped.emit()
+			_back_kick(wall_normal, wall_normal)
+		State.LEDGE_HANG:
+			# ぶら下がりから振り向いて、壁を蹴って後ろへ
+			_back_kick(-move.dir, -move.dir)
 		State.AIR:
 			pass  # 空中は向きだけ変える
 		_:
@@ -1075,6 +1583,9 @@ func _continuous_haptics() -> void:
 		State.SLIDE:
 			var k := clampf(horizontal_speed() / params.run_speed, 0.0, 1.5)
 			Haptics.hold(0.1 * k, 0.25 * k)
+		State.ZIPLINE:
+			var kz := clampf(_zip_speed / params.zip_max_speed, 0.0, 1.0)
+			Haptics.hold(0.05 + 0.1 * kz, 0.15 + 0.3 * kz)  # 線の唸り
 		State.GROUND:
 			if braking:
 				Haptics.hold(0.15, 0.1)  # 足を滑らせて止まる

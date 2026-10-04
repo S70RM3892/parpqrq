@@ -27,20 +27,25 @@ func to_title(course_select: bool = true) -> void:
 	get_tree().change_scene_to_file(TITLE_SCENE)
 
 
-## コースの記録 {best: 秒 or INF, medal: "DEV"/"GOLD"/"SILVER"/"BRONZE"/"", route_off: bool, ghost: bool}
+## コースの記録 {best: 秒 or INF, medal: "DEV"/"GOLD"/"SILVER"/"BRONZE"/"", route_off: bool, ghost: bool,
+##  shortcuts: 見つけた近道の数, shortcuts_total: 近道の数}
 func record(id: String) -> Dictionary:
 	var cfg := ConfigFile.new()
 	var best := INF
 	var route_off := false
+	var found := PackedStringArray()
 	if cfg.load(CourseTimer.SAVE_PATH) == OK:
 		best = cfg.get_value("best", id, INF)
 		route_off = cfg.get_value("route_off", id, false)
+		found = cfg.get_value("shortcuts", id, PackedStringArray())
 	var medals: Array = CourseCatalog.get_course(id).get("medals", [])
 	return {
 		"best": best,
 		"medal": CourseTimer.medal_for(best, PackedFloat32Array(medals)),
 		"route_off": route_off,
 		"ghost": FileAccess.file_exists("user://ghost_%s.dat" % id),
+		"shortcuts": found.size(),
+		"shortcuts_total": CourseCatalog.shortcut_count(id),
 	}
 
 
