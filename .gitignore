@@ -1,0 +1,8 @@
+# Godot
+.godot/
+/android/
+build/
+*.apk
+*.aab
+*.tmp
+export_credentials.cfg

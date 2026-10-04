@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/levels/test_course.tscn" id="1_course"]
+[ext_resource type="Script" path="res://tests/smoke_test.gd" id="2_test"]
+
+[node name="SmokeTest" type="Node"]
+
+[node name="TestCourse" parent="." instance=ExtResource("1_course")]
+
+[node name="Runner" type="Node" parent="."]
+script = ExtResource("2_test")

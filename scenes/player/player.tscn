@@ -1,0 +1,43 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
+[ext_resource type="Resource" path="res://resources/movement_default.tres" id="2_params"]
+[ext_resource type="Script" path="res://scripts/player/camera_rig.gd" id="3_rig"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 0.35
+height = 1.8
+
+[node name="Player" type="CharacterBody3D"]
+floor_max_angle = 0.872665
+floor_snap_length = 0.3
+script = ExtResource("1_player")
+params = ExtResource("2_params")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="EyeAnchor" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+
+[node name="CameraRig" type="Node3D" parent="." node_paths=PackedStringArray("eye")]
+top_level = true
+script = ExtResource("3_rig")
+eye = NodePath("../EyeAnchor")
+
+[node name="Pitch" type="Node3D" parent="CameraRig"]
+
+[node name="Bob" type="Node3D" parent="CameraRig/Pitch"]
+
+[node name="Dip" type="Node3D" parent="CameraRig/Pitch/Bob"]
+
+[node name="Tilt" type="Node3D" parent="CameraRig/Pitch/Bob/Dip"]
+
+[node name="Shake" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt"]
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake"]
+current = true
+fov = 90.0
+near = 0.05
+far = 400.0

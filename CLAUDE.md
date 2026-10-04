@@ -1,0 +1,26 @@
+# 1人称パルクールゲーム
+
+仕様書: https://claude.ai/artifact/BCSZ8Yp2NGFhR3yBnQEdz6 （判断基準は 手触り > 爽快さ > グラフィック。60fpsを割る強化は採用しない）
+
+## エンジンと言語
+- **Godot 4.7・GDScript。Godot 3の書き方は禁止。** 例:
+  - `KinematicBody` → `CharacterBody3D`、`move_and_slide(vel)` → `velocity` に代入して `move_and_slide()`
+  - `export var` → `@export var`、`onready var` → `@onready var`、`yield` → `await`
+  - `connect("sig", self, "f")` → `sig.connect(f)`、`Spatial` → `Node3D`、`rand_range` → `randf_range`
+- 変数・引数・戻り値には必ず型注釈を付ける（`untyped_declaration` 警告を有効にしてある）。
+- C#は使わない。
+- レンダラーは Mobile。SSR・SSAO・ボリュメトリックフォグ・SDFGI・VoxelGI は使えない前提で書く。
+
+## 構成
+- `scripts/player/player.gd` — 移動。速度計算は自前、`move_and_slide()` は衝突処理だけ
+- `scripts/player/camera_rig.gd` — top_level のカメラリグ。演出は Bob/Dip/Tilt/Shake 層ごとに分ける
+- `scripts/player/movement_params.gd` + `resources/movement_default.tres` — 動きの数値は全部ここ
+- `scripts/autoload/settings.gd` — プレイヤー設定（FOV・感度・演出の強さ）
+- `scenes/ui/debug_overlay.tscn` — FPS・フレーム時間・ゲート判定（F3 / Back）
+- `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義）
+
+## 作業ルール
+- 変更のたびに Godot MCP（`.mcp.json`）で実行し、出力のエラーを読んで自分で直す。
+- コミット前にスモークテストを通す: `godot --headless --path . res://tests/smoke_test.tscn`（終了コード0で合格）
+- 手触りの数値（ジャンプの高さ、カメラ演出の強さなど `MovementParams` と演出の値）は勝手に変えない。持ち主が走りながら決める。
+- 入力は InputMap のアクション名で扱う（キー・ボタンを直接読まない）。

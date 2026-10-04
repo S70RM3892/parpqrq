@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="MovementParams" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/movement_params.gd" id="1_mp"]
+
+[resource]
+script = ExtResource("1_mp")
