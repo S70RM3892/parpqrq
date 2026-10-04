@@ -32,6 +32,8 @@ void sky() {
 	float sd = max(dot(d, s), 0.0);
 	c += sun_color * pow(sd, 10.0) * sun_halo;
 	c += sun_color * pow(sd, 120.0) * sun_halo * 1.5;
+	// 地平線ほど太陽の色に染まる（低い太陽の朝・夕で空の下が暖かくなる）
+	c = mix(c, c * mix(vec3(1.0), sun_color, 0.35), (1.0 - smoothstep(0.0, 0.25, abs(y))) * pow(max(dot(normalize(d.xz + 1e-4), normalize(s.xz + 1e-4)), 0.0), 2.0) * (1.0 - smoothstep(0.1, 0.6, s.y)));
 	if (!AT_CUBEMAP_PASS) {
 		c += sun_color * smoothstep(sun_size, sun_size + 0.0003, sd) * 6.0;
 		if (stars > 0.0 && y > 0.0) {

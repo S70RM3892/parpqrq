@@ -167,6 +167,8 @@ func apply_preset(p: Dictionary) -> void:
 	cm.set_shader_parameter(&"cloud_color", p.cloud)
 	cm.set_shader_parameter(&"shade_color", p.cloud_shade)
 	cm.set_shader_parameter(&"coverage", p.coverage)
+	cm.set_shader_parameter(&"sun_color", p.sun)
+	cm.set_shader_parameter(&"sun_dir", to_sun)
 	LevelStyle.set_night(p.night)
 
 
