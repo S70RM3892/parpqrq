@@ -444,6 +444,8 @@ func _load() -> void:
 			_found[n] = true
 	if FileAccess.file_exists(_ghost_path()):
 		var f := FileAccess.open(_ghost_path(), FileAccess.READ)
+		if f == null or f.get_length() < 8:
+			return  # 書きかけで終わった・空のゴースト（読まない）
 		var data: Variant = f.get_var()
 		if data is Dictionary:
 			best_run = RunRecording.from_dict(data)
