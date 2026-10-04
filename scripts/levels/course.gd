@@ -65,7 +65,8 @@ func _ready() -> void:
 	var backdrop := Backdrop.new()
 	backdrop.name = "Backdrop"
 	add_child(backdrop)
-	backdrop.build(builder.route_points, CourseBuilder.STREET_Y, builder.start_xf.origin.y, int(def.get("seed", 1)))
+	backdrop.build(builder.route_points, CourseBuilder.STREET_Y, builder.start_xf.origin.y, int(def.get("seed", 1)),
+			int(def.get("area", 0)))
 
 	for i: int in builder.checkpoints.size():
 		var cp := Checkpoint.new()
