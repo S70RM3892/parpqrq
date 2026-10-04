@@ -94,7 +94,7 @@ func show_result(r: Dictionary, has_next: bool) -> void:
 		if int(r.get("new_shortcuts", 0)) > 0:
 			sc += "   +%d new" % int(r.new_shortcuts)
 		elif found < total:
-			sc += "   (a marker shows the next one)" if medal in ["DEV", "GOLD"] else "   (take GOLD for a hint)"
+			sc += "   (a marker shows the next one)" if bool(r.get("hint_on", false)) else "   (take GOLD for a hint)"
 		lines.append(sc)
 	if r.route_off:
 		lines.append("Cleared with route color off")

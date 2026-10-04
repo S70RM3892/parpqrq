@@ -135,7 +135,7 @@ static func area_of(id: String) -> Dictionary:
 static func shortcut_count(id: String) -> int:
 	var n := 0
 	for line: String in recipe(id):
-		if line.get_slice(" ", 0) in ["detour", "swinggap", "zipjog", "kickwall"]:
+		if line.get_slice(" ", 0) in CourseBuilder.SHORTCUT_STEPS:
 			n += 1
 	return n
 
@@ -177,8 +177,7 @@ class _Gen:
 
 	func add(line: String) -> void:
 		var head := line.get_slice(" ", 0)
-		if head in ["gap", "drop", "up", "ledge", "stairs", "wallrun", "walljump", "beam", "slope", "detour",
-				"swinggap", "zipjog", "kickwall"]:
+		if head in ["gap", "drop", "up", "ledge", "stairs", "wallrun", "walljump", "beam", "slope"] or head in CourseBuilder.SHORTCUT_STEPS:
 			out.append("floor " + str(floors[floor_rng.randi() % floors.size()]))
 		out.append(line)
 		# 屋上の高さを追う（上がりすぎ・下がりすぎを避けるため）

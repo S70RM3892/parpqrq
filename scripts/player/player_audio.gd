@@ -59,7 +59,7 @@ func _ready() -> void:
 	player.wall_kicked.connect(func() -> void:
 		_play(&"hand", -3.0, 0.7)  # 靴底が壁を叩く
 		_play(&"jump", -8.0, 1.1))
-	player.vault_jumped.connect(func() -> void: _play(&"jump", -6.0, 1.05))
+	player.vault_jumped.connect(func() -> void: _play(&"hand", -2.0, 1.15))  # 手で押し切る音（跳ぶ音は jumped が鳴らす）
 	player.wallrun_started.connect(func() -> void: _play(&"hand", -5.0, 0.85))
 	player.wall_jumped.connect(func() -> void:
 		_play(&"hand", -2.0)

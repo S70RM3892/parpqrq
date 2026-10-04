@@ -91,12 +91,21 @@ func find(feet: Vector3, dir: Vector3, reach: float, zip_reach: float, lo: float
 	return best
 
 
-## 全ての GrabLines から探す
-static func find_all(tree: SceneTree, feet: Vector3, dir: Vector3, reach: float, zip_reach: float,
-		lo: float, hi: float, skip_node: GrabLines, skip: int) -> Dictionary:
+## 木にある GrabLines の一覧
+static func all(tree: SceneTree) -> Array[GrabLines]:
+	var out: Array[GrabLines] = []
 	for n: Node in tree.get_nodes_in_group(GROUP):
 		var g := n as GrabLines
-		if g == null:
+		if g != null:
+			out.append(g)
+	return out
+
+
+## nodes の全ての GrabLines から探す。skip_node の skip 番目は除く（離した直後）
+static func find_in(nodes: Array[GrabLines], feet: Vector3, dir: Vector3, reach: float, zip_reach: float,
+		lo: float, hi: float, skip_node: GrabLines, skip: int) -> Dictionary:
+	for g: GrabLines in nodes:
+		if not is_instance_valid(g):
 			continue
 		var r := g.find(feet, dir, reach, zip_reach, lo, hi, skip if g == skip_node else -1)
 		if not r.is_empty():

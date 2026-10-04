@@ -29,6 +29,8 @@ extends RefCounted
 ## 区間（4つ）とチェックポイント（指定が無ければ3つ）はルートの長さで均等に置く。
 
 const STREET_Y := -45.0
+## 隠れた近道を1本作るレシピの手（CourseCatalog.shortcut_count もこれで数える）
+const SHORTCUT_STEPS: PackedStringArray = ["detour", "swinggap", "zipjog", "kickwall"]
 const LANE := 4.0
 const STEP_RISE := 0.4
 const STEP_RUN := 0.8
@@ -65,7 +67,9 @@ var splits: Array[Transform3D] = []
 var route_points: PackedVector3Array = []
 ## 隠れた近道（色を付けない）。{name, from: 主ルートの道しるべの番号（ここから分かれる）,
 ##  to: 戻る主ルートの道しるべの番号, nodes: 近道の道しるべ, found_xf / found_size: ここを通ったら発見（向きつきの箱）,
-##  found_states: 発見に数える状態の名前（Player.State のキー。空 = どれでも）, hint: 金メダルの後に目印を出す所}
+##  found_states: 発見に数える状態の名前（Player.State のキー。空 = どれでも）,
+##  then_xf / then_size: あれば、その後にここも通ったら発見（穴に落ちただけでは数えない）, hint: 金メダルの後に目印を出す所}
+## name は区間の種類と通し番号（"swing_2"）。同じ種類が2つあっても別に数える
 var shortcuts: Array[Dictionary] = []
 ## 掴める棒と線（スイングバー・ジップライン）。Course が GrabLines に渡す（GrabLines.bar / zip の形）
 var grab_lines: Array[Dictionary] = []
@@ -195,11 +199,14 @@ func _bn(p: Vector3, act: Act = Act.NONE, lead_t: float = 0.0, lead_c: float = 0
 	return {"p": p, "act": act, "lead_t": lead_t, "lead_c": lead_c, "dist": -1.0}
 
 
-## 近道を登録する。from / to = 主ルートの道しるべの番号。found = 発見の判定の箱（frame 基準の位置と大きさ）
+## 近道を登録する。from / to = 主ルートの道しるべの番号。found = 発見の判定の箱（向きつき）。
+## then = その後に通る2つ目の箱（無ければ大きさ 0）
 func _shortcut(sc_name: String, from: int, to: int, sc_nodes: Array[Dictionary], found_xf: Transform3D,
-		found_size: Vector3, found_states: Array[String], hint: Vector3) -> void:
-	shortcuts.append({"name": sc_name, "from": from, "to": to, "nodes": sc_nodes, "found_xf": found_xf,
-			"found_size": found_size, "found_states": found_states, "hint": hint})
+		found_size: Vector3, found_states: Array[String], hint: Vector3,
+		then_xf: Transform3D = Transform3D.IDENTITY, then_size: Vector3 = Vector3.ZERO) -> void:
+	shortcuts.append({"name": "%s_%d" % [sc_name, shortcuts.size() + 1], "from": from, "to": to, "nodes": sc_nodes,
+			"found_xf": found_xf, "found_size": found_size, "found_states": found_states, "hint": hint,
+			"then_xf": then_xf, "then_size": then_size})
 
 
 ## 自動走行の道：主ルートだけ、または全部の近道を通る道
@@ -628,8 +635,10 @@ func _detour(side: float, kind: String) -> void:
 	if kind == "swing":
 		sc.append(_bn(xf * Vector3(0, 0, -(near + 4.5)), Act.SWING))
 	sc.append(_bn(xf * Vector3(0, 0, -(near + hole + 2.0))))
+	# 穴の上を通り、向こうの縁（主ルートの通路からは離れた真ん中）に着いたら発見。落ちただけでは数えない
 	_shortcut("detour_" + kind, from, to, sc, Transform3D(xf.basis, xf * Vector3(0, 2.0, -(near + hole * 0.5))),
-			Vector3(hw * 2.0 - 1.0, 3.0, hole - 1.0), [], xf * Vector3(0, 1.0, -near))
+			Vector3(hw * 2.0 - 1.0, 3.0, hole - 1.0), [], xf * Vector3(0, 1.0, -near),
+			Transform3D(xf.basis, xf * Vector3(0, 1.6, -(near + hole + 1.6))), Vector3(4.0, 3.6, 3.2))
 	if kind != "vault":
 		_scuffs(Transform3D(xf.basis, xf * Vector3(0, 0, -(near - 0.6))), 5, 1.4, 1.0)
 	_keep_clear(xf * Vector3(0, 0, -near), xf * Vector3(0, 0, -(near + hole)), 1.0)

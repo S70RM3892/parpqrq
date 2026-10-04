@@ -52,6 +52,8 @@ var shortcuts: Array[Dictionary] = []
 var _found: Dictionary = {}
 var _found_run: Dictionary = {}
 var _new_run: int = 0
+## 1つ目の箱を通った近道（2つ目の箱がある近道で、この走りの間だけ。戻されたら消す）
+var _stage: Dictionary = {}
 
 @onready var _label: Label = $HUD/Time
 @onready var _ghost: Node3D = $Ghost
@@ -139,10 +141,10 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if _player != null and not shortcuts.is_empty() and Engine.get_physics_frames() % 2 == 0:
-		_check_shortcuts()
 	if not running:
 		return
+	if _player != null and not shortcuts.is_empty() and Engine.get_physics_frames() % 2 == 0:
+		_check_shortcuts()
 	elapsed += delta
 	if _player != null:
 		_max_speed = maxf(_max_speed, _player.horizontal_speed())
@@ -152,6 +154,7 @@ func _physics_process(delta: float) -> void:
 
 ## スタートへ戻ったら計り直し（スタート範囲を出た瞬間にまた始まる）。チェックポイントへ戻った時は計測を続ける
 func _on_respawned(to_start: bool) -> void:
+	_stage.clear()
 	if to_start:
 		running = false
 		_ghost.visible = false
@@ -169,6 +172,7 @@ func _on_start_exited(body: Node3D) -> void:
 	_perfects_at_start = _player.perfect_count
 	_splits = []
 	_found_run.clear()
+	_stage.clear()
 	_new_run = 0
 	recording.clear()
 	_ghost.visible = best_run.size() > 0
@@ -213,6 +217,7 @@ func _on_goal_entered(body: Node3D) -> void:
 		"next_medal": next.get("medal", ""), "next_time": next.get("time", 0.0),
 		"shortcuts_total": shortcuts.size(), "shortcuts_found": _found.size(),
 		"shortcuts_used": _found_run.size(), "new_shortcuts": _new_run,
+		"hint_on": medal_times.size() > 1 and _best <= medal_times[1] and _found.size() < shortcuts.size(),
 	}
 	if show_result_label:
 		var lines: PackedStringArray = []
@@ -272,13 +277,19 @@ func _check_shortcuts() -> void:
 		var sc_name: String = sc.name
 		if _found_run.has(sc_name):
 			continue
-		var states: Array = sc.get("found_states", [])
-		if not states.is_empty() and not states.has(Player.State.find_key(_player.state)):
-			continue
-		var local := (sc.found_xf as Transform3D).affine_inverse() * center
-		var half := (sc.found_size as Vector3) * 0.5
-		if absf(local.x) > half.x or absf(local.y) > half.y or absf(local.z) > half.z:
-			continue
+		var then_size: Vector3 = sc.get("then_size", Vector3.ZERO)
+		if _stage.has(sc_name):
+			if not _inside(center, sc.then_xf, then_size):
+				continue
+		else:
+			var states: Array = sc.get("found_states", [])
+			if not states.is_empty() and not states.has(Player.State.find_key(_player.state)):
+				continue
+			if not _inside(center, sc.found_xf, sc.found_size):
+				continue
+			if then_size != Vector3.ZERO:
+				_stage[sc_name] = true  # 2つ目の箱を待つ
+				continue
 		_found_run[sc_name] = true
 		if _found.has(sc_name):
 			continue
@@ -288,6 +299,12 @@ func _check_shortcuts() -> void:
 		_show("SHORTCUT FOUND  %d / %d" % [_found.size(), shortcuts.size()], GOLD, SPLIT_SHOW)
 		Audio.ui(&"split", 1.25)
 		shortcut_found.emit(sc_name, _found.size(), shortcuts.size())
+
+
+static func _inside(p: Vector3, xf: Transform3D, size: Vector3) -> bool:
+	var local := xf.affine_inverse() * p
+	var half := size * 0.5
+	return absf(local.x) <= half.x and absf(local.y) <= half.y and absf(local.z) <= half.z
 
 
 func _save_found() -> void:

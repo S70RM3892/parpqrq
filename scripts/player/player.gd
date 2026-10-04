@@ -30,8 +30,6 @@ signal wall_kicked
 signal vault_jumped
 signal swing_started
 signal zip_started
-## スイングバー・ジップラインから離れた（jump = ジャンプで離した）
-signal line_released(jump: bool)
 ## 壁に正面からぶつかった。speed = 壁に向かっていた速度 m/s
 signal crashed(speed: float)
 ## Perfect判定。kind = &"landing_jump" / &"roll" / &"vault" / &"wall_jump" / &"slide_jump"
@@ -139,6 +137,11 @@ var _swing_scale: float = 1.0
 var _swing_cross_clock: float = -INF
 ## 飛び込んだ時の水平の速さ。理想の角度までに離せば、これを保って飛ぶ（振り返すたびに減る）
 var _swing_ref: float = 0.0
+## 振る先が塞がっていたフレーム数（続いたら手を放す）
+var _swing_blocked: int = 0
+## コースの GrabLines の一覧と、探したフレーム
+var _grab_cache: Array[GrabLines] = []
+var _grab_cache_frame: int = -1000
 ## ジップライン：高い端、下る向き（単位）、長さ、高い端からの距離、速さ
 var _zip_a: Vector3 = Vector3.ZERO
 var _zip_u: Vector3 = Vector3.FORWARD
@@ -256,6 +259,10 @@ func respawn(at: Transform3D = spawn) -> void:
 	_grab_cooldown = 0.0
 	_line_owner = null
 	_line_index = -1
+	_kicks = 0
+	_last_kick_normal = Vector3.ZERO
+	_kick_contact_clock = -INF
+	_climb_carry = false
 	_set_height(STAND_HEIGHT)
 	_set_state(State.AIR)
 	_eye_off = Vector3.UP * EYE_HEIGHT
@@ -876,8 +883,9 @@ func _try_wall_kick(delta: float) -> bool:
 		return false
 	if _kicks > 0 and n.dot(_last_kick_normal) > 0.9:
 		return false
-	if velocity.y < 0.0 and VaultProbe.floor_below(self, 0.35):
-		return false  # 着地の直前の押しは着地のジャンプに回す
+	# 着地の直前（ジャンプの先行入力が着地で効く間に落ちる高さ）の押しは、着地のジャンプに回す
+	if velocity.y < 0.0 and VaultProbe.floor_below(self, maxf(0.35, -velocity.y * params.jump_buffer + 0.25)):
+		return false
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	var nd := h.dot(n)
 	# 触れた時刻：もう触れていればその時刻、向かっていれば届く時刻の見込み
@@ -974,23 +982,33 @@ func _try_grab_line() -> bool:
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	var dir := h.normalized() if h.length() > 0.5 else _facing()
 	var skip := _line_index if _grab_cooldown > 0.0 else -1
-	var r := GrabLines.find_all(get_tree(), global_position, dir, params.swing_reach, params.zip_reach,
+	var r := GrabLines.find_in(_grab_nodes(), global_position, dir, params.swing_reach, params.zip_reach,
 			GRAB_LO, GRAB_HI, _line_owner, skip)
 	if r.is_empty():
 		return false
-	_line_owner = r.owner
-	_line_index = r.index
 	if int(r.kind) == GrabLines.Kind.BAR:
-		_start_swing(r, dir)
+		if not _start_swing(r, dir):
+			return false
 	else:
 		_start_zip(r)
+	_line_owner = r.owner
+	_line_index = r.index
 	return true
+
+
+## コースの GrabLines（1秒ごとに探し直す。毎フレーム木を探さない）
+func _grab_nodes() -> Array[GrabLines]:
+	var frame := Engine.get_physics_frames()
+	if frame - _grab_cache_frame > 60 or _grab_cache.any(func(g: GrabLines) -> bool: return not is_instance_valid(g)):
+		_grab_cache = GrabLines.all(get_tree())
+		_grab_cache_frame = frame
+	return _grab_cache
 
 
 ## スイング：バーを支点に、重心が半径 swing_radius の円を描く振り子。
 ## 速く飛び込んだ分は振れ幅の上限（swing_max_angle）で抑え、倍率として覚えて離す時に返す（勢いを失わない）。
-## 振れる向きに倒すとこげる、何も倒さないと少しずつ減る
-func _start_swing(r: Dictionary, dir: Vector3) -> void:
+## 振れる向きに倒すとこげる、何も倒さないと少しずつ減る。振る場所が壁などで塞がっていれば掴まない（false）
+func _start_swing(r: Dictionary, dir: Vector3) -> bool:
 	var line: Dictionary = (r.owner as GrabLines).lines[int(r.index)]
 	var u := ((line.b as Vector3) - (line.a as Vector3)).normalized()
 	var f := dir - u * dir.dot(u)
@@ -1001,6 +1019,11 @@ func _start_swing(r: Dictionary, dir: Vector3) -> void:
 	var pivot: Vector3 = r.point
 	var rel := global_position + Vector3.UP * SWING_COM - pivot
 	var theta := clampf(asin(clampf(rel.dot(f) / radius, -0.95, 0.95)), deg_to_rad(-55.0), deg_to_rad(40.0))
+	_swing_pivot = pivot
+	_swing_f = f
+	var feet := _swing_feet(theta)
+	if test_move(global_transform, feet - global_position):
+		return false
 	var t_hat := f * cos(theta) + Vector3.UP * sin(theta)
 	var v_t := velocity.dot(t_hat)
 	var th_max := deg_to_rad(params.swing_max_angle)
@@ -1009,20 +1032,18 @@ func _start_swing(r: Dictionary, dir: Vector3) -> void:
 	_swing_scale = maxf(1.0, maxf(horizontal_speed(), absf(v_t)) / v_bottom)
 	_swing_ref = horizontal_speed()
 	_swing_omega = clampf(v_t / radius, -cap, cap)
-	_swing_pivot = pivot
-	_swing_f = f
 	_swing_cross_clock = -INF
+	_swing_blocked = 0
 	swing_angle = theta
 	move = _grip(pivot, f)
 	_since_jump_press = INF
 	_pending_time = -1.0
 	_add_momentum(params.momentum_gain_move)
 	_set_state(State.SWING)
-	var feet := _swing_feet(theta)
-	if not test_move(global_transform, feet - global_position):
-		_snap_body(feet)
+	_snap_body(feet)
 	velocity = t_hat * _swing_omega * radius
 	swing_started.emit()
+	return true
 
 
 func _swing(delta: float) -> void:
@@ -1058,9 +1079,14 @@ func _swing(delta: float) -> void:
 		_swing_cross_clock = _clock - delta + delta * k
 	var feet := _swing_feet(theta)
 	if test_move(global_transform, feet - global_position):
-		_swing_omega = -_swing_omega * 0.3  # 何かに当たった：跳ね返る
+		# 何かに当たった：跳ね返る。続けて塞がっていれば手を放す（空中で固まらない）
+		_swing_omega = -_swing_omega * 0.3
 		velocity = Vector3.ZERO
+		_swing_blocked += 1
+		if _swing_blocked >= 6:
+			_release_swing(false)
 		return
+	_swing_blocked = 0
 	_swing_omega = omega
 	swing_angle = theta
 	_teleport(feet, delta)
@@ -1177,7 +1203,6 @@ func _end_grab(jump: bool) -> void:
 	if jump:
 		_since_jump_press = INF
 		jumped.emit()
-	line_released.emit(jump)
 
 
 ## 手を掛ける所（手の層が両手を置く）。dir = 指先の向き
@@ -1450,7 +1475,7 @@ func _update_move_hint() -> void:
 			var dir := h.normalized() if h.length() > 0.5 else _facing()
 			if h.length() >= params.wallrun_min_speed and not VaultProbe.side_wall(self, dir, _capsule.radius + 1.2).is_empty():
 				move_hint = &"wall_run"
-			elif not GrabLines.find_all(get_tree(), global_position + dir * 0.6, dir, params.swing_reach * 2.0,
+			elif not GrabLines.find_in(_grab_nodes(), global_position + dir * 0.6, dir, params.swing_reach * 2.0,
 					params.zip_reach * 2.0, GRAB_LO - 0.6, GRAB_HI + 0.8, null, -1).is_empty():
 				move_hint = &"grab"
 			elif _kicks < params.wall_kick_max and not _find_kick_wall().is_empty():

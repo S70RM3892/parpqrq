@@ -268,7 +268,7 @@ func _wall_kick_test(p: Player) -> void:
 	p.wall_kicked.connect(on_kick)
 	p.perfect.connect(on_perfect)
 	# 遅め（横ウォールラン・縦ウォールランの速さに届かない）に斜めから壁（面 x=20.5）へ
-	await _place(p, Vector3(19.4, 1.5, -45.0), Vector3(4.0, 0.0, -3.0))
+	await _place(p, Vector3(19.4, 1.9, -45.0), Vector3(4.0, 0.0, -3.0))
 	var pressed := false
 	for i: int in 40:
 		await get_tree().physics_frame
@@ -286,17 +286,16 @@ func _wall_kick_test(p: Player) -> void:
 	_check_true("wall kick: same wall cannot be kicked twice in a row (%d)" % c.kicks, c.kicks == 1)
 	await _frames(40)
 
-	# 3.0 m の箱の前で落ちている：そのままでは縁に届かない
+	# 3.0 m の箱の前、0.75 mの高さ：そのままでは縁に届かない（手は足元から2.2 mまで）
 	Input.action_press(&"move_forward")
-	await _place(p, Vector3(-16.0, 0.6, -50.13), Vector3(0.0, -1.0, 0.0))
+	await _place(p, Vector3(-16.0, 0.75, -50.13), Vector3.ZERO)
 	var hung := false
 	for i: int in 25:
 		await get_tree().physics_frame
 		hung = hung or p.state in [Player.State.LEDGE_HANG, Player.State.CLIMB]
 	_check_true("kick up: without a kick the 3.0 m ledge is out of reach", not hung)
-	# 壁の方へ倒したまま蹴る → 上へ伸びて縁を掴み、登る
-	await _place(p, Vector3(-16.0, 0.6, -50.13), Vector3(0.0, -1.0, 0.0))
-	await _frames(2)
+	# 壁の方へ倒したまま蹴る → 上へ伸びて縁を掴み、登る（着地の直前ではないので着地のジャンプに回らない）
+	await _place(p, Vector3(-16.0, 0.75, -50.13), Vector3.ZERO)
 	await _tap(&"jump")
 	var climbed := false
 	for i: int in 60:
@@ -304,6 +303,26 @@ func _wall_kick_test(p: Player) -> void:
 		climbed = climbed or p.state == Player.State.CLIMB
 	Input.action_release(&"move_forward")
 	_check_true("kick up: kicked and climbed the 3.0 m ledge (y %.2f)" % p.global_position.y, climbed and p.global_position.y > 2.95)
+
+	# 壁際（0.2 m）を落ちながら、着地の約0.11秒前（ジャンプの先行入力0.12秒の内）に押したジャンプは
+	# 壁を蹴らず、着地のジャンプになる
+	c.kicks = 0
+	var jumps := {"n": 0}
+	var on_jump := func() -> void: jumps.n += 1
+	p.jumped.connect(on_jump)
+	await _place(p, Vector3(19.95, 2.0, -42.0), Vector3(0, 0, -5.0))
+	var g_fall := mp.gravity() * mp.fall_gravity_mult
+	while p.state == Player.State.AIR and p.global_position.y > absf(p.velocity.y) * 0.11 + 0.5 * g_fall * 0.11 * 0.11:
+		await get_tree().physics_frame
+	await _tap(&"jump")
+	for i: int in 20:
+		await get_tree().physics_frame
+		if jumps.n > 0:
+			break
+	p.jumped.disconnect(on_jump)
+	_check_true("wall kick: a buffered landing jump next to a wall stays a landing jump (kicks %d, jumps %d)" % [c.kicks, jumps.n],
+			c.kicks == 0 and jumps.n == 1)
+	await _frames(40)
 	p.wall_kicked.disconnect(on_kick)
 	p.perfect.disconnect(on_perfect)
 
