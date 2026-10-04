@@ -3,13 +3,17 @@ extends Node
 ## プレイヤーの音（仕様書 5章「サウンド」）。Player のシグナルを受けて、その物理フレームのうちに鳴らす
 ## （効果音は画面の動きと同じフレームで鳴らす。ずれると手触りが壊れる）。
 ## - 風切り音：速度の2乗に比例して大きく、速いほど高音を足す。技の上限（max_flow_speed）で最大
-## - 足音：床の素材別（コンクリ・金属・ガラス・砂利）。間隔は足取り（速いほど詰まる）
+## - 足音：床の素材別（コンクリ・金属・ガラス・砂利）に8種ずつ。毎回ピッチを ±4% ばらつかせ、同じ音が続けて鳴らない。間隔は足取り（速いほど詰まる）
 ## - 息づかい：勢い値が高いほど荒く・速く
-## - 手が触れる音：ヴォルト・クライム・縁を掴む・壁に張り付く
-## - 着地：落下速度で3段階。ハードランディングは低音を強調
+## - 手が触れる音：強さ3段階（軽 = ヴォルト・壁に張り付く、中 = クライム・縁掴み、重 = スイングバー・ジップライン・ウォールキック）× 3種
+## - 着地：落下速度で3段階（軽・中・重）× 3種。ハードランディングは低音を強調
+## - 残響：足音・着地・掴みは SFXRoom バス（エリアごとの残響。Audio.set_room）を通す。風・息・スライドの擦れは通さない
 ## 1人称なので位置を持たない AudioStreamPlayer で鳴らす。
 
 const SURFACES: PackedStringArray = ["concrete", "metal", "glass", "gravel"]
+const STEP_VARIANTS := 8
+const VARIANTS := 3          ## 着地と掴みの種類（強さごと）
+const PITCH_SPREAD := 1.04   ## AudioStreamRandomizer の random_pitch。1/1.04〜1.04 倍（約 ±4%）
 
 @export var player: Player
 
@@ -24,24 +28,16 @@ var _wind_k: float = 0.0
 
 func _ready() -> void:
 	for s: String in SURFACES:
-		var r := AudioStreamRandomizer.new()
-		r.playback_mode = AudioStreamRandomizer.PLAYBACK_RANDOM_NO_REPEATS
-		r.random_pitch = 1.08
-		r.random_volume_offset_db = 2.0
-		for i: int in 3:
-			r.add_stream(-1, load("res://assets/audio/step_%s_%d.wav" % [s, i]))
-		_steps[StringName(s)] = _make(r, 3)
-	var hands := AudioStreamRandomizer.new()
-	hands.random_pitch = 1.1
-	for i: int in 2:
-		hands.add_stream(-1, load("res://assets/audio/hand_%d.wav" % i))
-	_one_shots[&"hand"] = _make(hands, 3)
-	for n: String in ["land_light", "land_mid", "land_heavy", "roll", "jump", "crash", "perfect", "respawn"]:
-		_one_shots[StringName(n)] = _make(load("res://assets/audio/%s.wav" % n), 2)
-	_wind_low = _make(load("res://assets/audio/wind_low.wav"), 1)
-	_wind_high = _make(load("res://assets/audio/wind_high.wav"), 1)
-	_breath = _make(load("res://assets/audio/breath.wav"), 1)
-	_slide = _make(load("res://assets/audio/slide_loop.wav"), 1)
+		_steps[StringName(s)] = _make(_variants("step_%s" % s, STEP_VARIANTS, 1.5), 3, &"SFXRoom")
+	for strength: String in ["light", "mid", "heavy"]:
+		_one_shots[StringName("hand_" + strength)] = _make(_variants("hand_" + strength, VARIANTS, 1.5), 3, &"SFXRoom")
+		_one_shots[StringName("land_" + strength)] = _make(_variants("land_" + strength, VARIANTS, 1.5), 2, &"SFXRoom")
+	for n: String in ["roll", "jump", "crash", "perfect", "respawn"]:
+		_one_shots[StringName(n)] = _make(load("res://assets/audio/%s.wav" % n), 2, &"SFXRoom")
+	_wind_low = _make(load("res://assets/audio/wind_low.wav"), 1, &"SFX")
+	_wind_high = _make(load("res://assets/audio/wind_high.wav"), 1, &"SFX")
+	_breath = _make(load("res://assets/audio/breath.wav"), 1, &"SFX")
+	_slide = _make(load("res://assets/audio/slide_loop.wav"), 1, &"SFX")
 	for loop: AudioStreamPlayer in [_wind_low, _wind_high, _breath]:
 		loop.volume_db = -80.0
 		if Audio.enabled:
@@ -51,23 +47,24 @@ func _ready() -> void:
 	player.landed.connect(_on_landed)
 	player.rolled.connect(func(_d: float) -> void: _play(&"roll", 0.0))
 	player.jumped.connect(func() -> void: _play(&"jump", -10.0, randf_range(0.95, 1.08)))
-	player.vault_started.connect(func() -> void: _play(&"hand", 0.0))
-	player.climb_started.connect(func() -> void: _play(&"hand", 0.0))
-	player.ledge_grabbed.connect(func() -> void: _play(&"hand", 1.0))
-	player.swing_started.connect(func() -> void: _play(&"hand", 2.0, 0.8))
-	player.zip_started.connect(func() -> void: _play(&"hand", 2.0, 0.75))
+	player.vault_started.connect(func() -> void: _play(&"hand_light", 0.0))
+	player.climb_started.connect(func() -> void: _play(&"hand_mid", 0.0))
+	player.ledge_grabbed.connect(func() -> void: _play(&"hand_mid", 1.0))
+	player.swing_started.connect(func() -> void: _play(&"hand_heavy", 0.0))
+	player.zip_started.connect(func() -> void: _play(&"hand_heavy", 0.0, 0.9))
 	player.wall_kicked.connect(func() -> void:
-		_play(&"hand", -3.0, 0.7)  # 靴底が壁を叩く
+		_play(&"hand_heavy", -3.0, 0.8)  # 靴底が壁を叩く
 		_play(&"jump", -8.0, 1.1))
-	player.vault_jumped.connect(func() -> void: _play(&"hand", -2.0, 1.15))  # 手で押し切る音（跳ぶ音は jumped が鳴らす）
-	player.wallrun_started.connect(func() -> void: _play(&"hand", -5.0, 0.85))
+	player.vault_jumped.connect(func() -> void: _play(&"hand_light", -2.0, 1.1))  # 手で押し切る音（跳ぶ音は jumped が鳴らす）
+	player.wallrun_started.connect(func() -> void: _play(&"hand_light", -5.0, 0.9))
 	player.wall_jumped.connect(func() -> void:
-		_play(&"hand", -2.0)
+		_play(&"hand_mid", -2.0)
 		_play(&"jump", -6.0))
 	player.crashed.connect(func(_s: float) -> void: _play(&"crash", 0.0))
 	player.perfect.connect(func(_k: StringName) -> void: _play(&"perfect", -2.0))
 	player.respawned.connect(func(_to_start: bool) -> void: _play(&"respawn", -8.0))
-	Audio.set_mode(Audio.Mode.RUN)
+	# 走っているエリアの曲と残響（コース以外、白箱のテストコースなどは朝）
+	Audio.set_mode(Audio.Mode.RUN, _area_time())
 
 
 func _process(delta: float) -> void:
@@ -94,6 +91,16 @@ func _process(delta: float) -> void:
 	elif _slide.playing:
 		_slide.stop()
 	Audio.intensity = m
+
+
+## このコースのエリアの時間帯（朝・昼・夕・夜）。親が Course でなければ朝
+func _area_time() -> StringName:
+	var course := player.get_parent()
+	if course != null:
+		var area: Variant = course.get(&"area")
+		if area is Dictionary:
+			return StringName(str((area as Dictionary).get("time", "morning")))
+	return &"morning"
 
 
 func _on_footstep() -> void:
@@ -130,10 +137,21 @@ func _play(sound: StringName, db: float, pitch: float = 1.0) -> void:
 	p.play()
 
 
-func _make(stream: AudioStream, polyphony: int) -> AudioStreamPlayer:
+## base_0.wav … base_(count-1).wav を、同じ音が続けて鳴らないランダム再生にする（ピッチは ±4%、音量は ±1.5 dB）
+func _variants(base: String, count: int, volume_range_db: float) -> AudioStreamRandomizer:
+	var r := AudioStreamRandomizer.new()
+	r.playback_mode = AudioStreamRandomizer.PLAYBACK_RANDOM_NO_REPEATS
+	r.random_pitch = PITCH_SPREAD
+	r.random_volume_offset_db = volume_range_db
+	for i: int in count:
+		r.add_stream(-1, load("res://assets/audio/%s_%d.wav" % [base, i]))
+	return r
+
+
+func _make(stream: AudioStream, polyphony: int, bus: StringName) -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
 	p.stream = stream
-	p.bus = &"SFX"
+	p.bus = bus
 	p.max_polyphony = polyphony
 	add_child(p)
 	return p
