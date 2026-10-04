@@ -69,6 +69,37 @@ static func set_night(amount: float) -> void:
 	RenderingServer.global_shader_parameter_set(&"night", night_amount)
 
 
+## 光を焼く時の面の色（線形）。シェーダーの模様（窓・縞・枠）をならした平均の色
+static func bake_albedo(mat: int, tint: Color) -> Color:
+	var m := material(mat)
+	var a := (m.get_shader_parameter(&"albedo") as Color).srgb_to_linear()
+	var t := Color(tint.r, tint.g, tint.b)
+	match mat:
+		Mat.ROUTE:
+			a = ROUTE_COLOR.srgb_to_linear()
+		Mat.BUILDING:
+			a = a.lerp(Color(0.30, 0.36, 0.44).srgb_to_linear(), 0.3)  # 窓が3割
+		Mat.HAZARD:
+			a = a.lerp(Color(0.12, 0.12, 0.13).srgb_to_linear(), 0.5)  # 黒の縞が半分
+		Mat.GLASS:
+			a = a * 0.6
+		Mat.LIGHT:
+			a = Color(0.2, 0.2, 0.2)
+	return Color(a.r * t.r, a.g * t.g, a.b * t.b)
+
+
+## 光を焼く時に面が出す光（線形）。照明・ネオンは夜ほど強い（level.gdshader の pattern 7 と同じ）、ルートカラーは近くの淡い光
+static func bake_emission(mat: int, tint: Color) -> Color:
+	match mat:
+		Mat.LIGHT:
+			var e := 3.0 * lerpf(0.35, 1.0, night_amount)
+			return Color(tint.r * e, tint.g * e, tint.b * e)
+		Mat.ROUTE:
+			var r := ROUTE_COLOR.srgb_to_linear() * (0.1 * (1.0 + night_amount * 1.2))
+			return Color(r.r, r.g, r.b)
+	return Color(0, 0, 0)
+
+
 static func _configure(m: ShaderMaterial, pattern: int, albedo: Color, roughness: float, metallic: float) -> void:
 	m.set_shader_parameter(&"pattern", pattern)
 	m.set_shader_parameter(&"albedo", albedo)

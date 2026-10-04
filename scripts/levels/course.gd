@@ -19,6 +19,8 @@ var player: Player
 var timer: CourseTimer
 var free_run: bool = false
 var build_ms: int = 0
+## 焼いた光がこのコースの形に合っているか（false = 焼き直していない。コーステストが落とす）
+var lightmap_ok: bool = false
 var pause_menu: PauseMenu
 var results: ResultsPanel
 var replay: ReplayViewer
@@ -46,6 +48,7 @@ func _ready() -> void:
 		builder.build(CourseCatalog.recipe(course_id))
 	geo.build()
 	add_child(geo)
+	lightmap_ok = LevelLighting.apply(geo, course_id)
 	var grabs := GrabLines.new()
 	grabs.name = "GrabLines"
 	grabs.lines = builder.grab_lines

@@ -143,6 +143,14 @@ night={
 "type": "float",
 "value": 0.0
 }
+level_lightmap={
+"type": "sampler2D",
+"value": ""
+}
+lightmap_on={
+"type": "float",
+"value": 0.0
+}
 
 [physics]
 

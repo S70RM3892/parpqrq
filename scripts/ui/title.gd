@@ -46,6 +46,7 @@ func _build_background() -> void:
 	b.build(BG_RECIPE)
 	geo.build()
 	add_child(geo)
+	LevelLighting.apply(geo, "title")
 	var atmo := Atmosphere.new()
 	atmo.preset = &"morning"
 	atmo.fog_floor = -6.0

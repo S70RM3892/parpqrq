@@ -7,3 +7,4 @@ build/
 *.tmp
 export_credentials.cfg
 /_capture/
+assets/source/textures/

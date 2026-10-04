@@ -5,10 +5,15 @@ shader_type spatial;
 //   UV2     = 面の大きさ m
 //   CUSTOM0 = (部品の底からの高さ m, 面の種類 0=側面 1=上面 2=下面, 部品ごとの乱数, 0)
 //   COLOR   = 色味（LIGHT は発光色）
-// ベイクした光（LightmapGI）の代わりに、接地の陰と縁の線をここで描く（実行時に組むコースは焼けないため。描画の追加コストなし）
+//   CUSTOM1 = 焼いた光（ライトマップ）のアトラスの uv（焼かない面は -1）
+// 焼いた光（tools/bake_lighting.tscn → LevelLighting）：A = 空の見え方（環境光と映り込みに AO として掛ける）、
+// RGB = 照り返し（白い壁に日向の床やオレンジの壁の色が滲む。Mirror's Edge の見た目の核）。
+// 焼いていない時は、接地の陰と縁の線をここで描く（描画の追加コストなし）
 
 global uniform float route_strength; // 1 = ルートカラーON、0 = OFF（設定）
 global uniform float night;          // 0 = 昼 〜 1 = 夜（窓・照明が灯る）
+global uniform sampler2D level_lightmap : filter_linear, repeat_disable;
+global uniform float lightmap_on;    // 1 = このコースの焼いた光がある
 
 uniform int pattern = 0; // 0 無地 1 コンクリ 2 金属 3 ガラス 4 砂利 5 ビル 6 ルート 7 照明 8 工事の縞
 uniform vec3 albedo : source_color = vec3(0.92, 0.92, 0.9);
@@ -21,10 +26,15 @@ uniform vec3 stripe_color : source_color = vec3(0.12, 0.12, 0.13);
 uniform vec3 window_color : source_color = vec3(0.30, 0.36, 0.44);
 uniform vec3 window_light : source_color = vec3(1.0, 0.8, 0.55);
 
+uniform float bounce_strength = 1.0;  // 照り返しの強さ
+uniform float ao_strength = 1.0;      // 空の見え方を環境光に掛ける強さ
+
 varying vec4 v_custom;
+varying vec2 v_lm;
 
 void vertex() {
 	v_custom = CUSTOM0;
+	v_lm = CUSTOM1.xy;
 }
 
 float hash12(vec2 p) {
@@ -108,13 +118,20 @@ void fragment() {
 		col = mix(col, stripe_color, s);
 	}
 
+	bool baked = lightmap_on > 0.5 && v_lm.x >= 0.0;
 	// 面の境目を少し暗く（形の輪郭を読みやすく）
-	col *= 1.0 - (1.0 - smoothstep(0.0, 0.035, edge_d)) * 0.14;
-	if (side) {
+	col *= 1.0 - (1.0 - smoothstep(0.0, 0.035, edge_d)) * (baked ? 0.07 : 0.14);
+	if (side && !baked) {
 		// 床に接する所の陰と、上端のすぐ下の細い影（縁が読める）
 		col *= mix(0.66, 1.0, smoothstep(0.0, 1.3, h));
 		float lip = size.y - p.y;
 		col *= 1.0 - (smoothstep(0.09, 0.11, lip) - smoothstep(0.14, 0.2, lip)) * 0.16;
+	}
+
+	if (baked) {
+		vec4 lm = texture(level_lightmap, v_lm);
+		AO = mix(1.0, lm.a, ao_strength);
+		emit += col * (1.0 - metal) * (lm.rgb * lm.rgb * 4.0) * bounce_strength;
 	}
 
 	ALBEDO = col;

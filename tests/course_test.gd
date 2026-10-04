@@ -35,6 +35,10 @@ func _run_course(c: Dictionary) -> String:
 	var main := await _run_once(c, false)
 	var short := await _run_once(c, true)
 	var ok: bool = main.ok and short.ok
+	if not main.lightmap_ok:
+		_failed += 1
+		ok = false
+		print("FAIL %s: lightmap stale or missing (run: godot --headless --path . res://tools/bake_lighting.tscn -- --only=%s)" % [c.id, c.id])
 	var t: float = main.time
 	var ts: float = short.time
 	# 近道ごとに縮んだ時間：分かれる道しるべ → 戻る道しるべ までの時間を2つの走りで比べる
@@ -127,7 +131,8 @@ func _run_once(c: Dictionary, take_shortcuts: bool) -> Dictionary:
 				"to_dist": float(course.builder.nodes[int(sc.to)].dist)})
 	var out := {"ok": ok, "time": float(res.get("time", -1.0)), "passed": bot.passed, "crash": counts.crash,
 			"perfect": counts.perfect, "route_len": course.builder.route_len, "build_ms": course.build_ms,
-			"shortcuts": shortcuts, "found": course.timer.shortcuts_found(), "hint": course.hint_shortcut}
+			"shortcuts": shortcuts, "found": course.timer.shortcuts_found(), "hint": course.hint_shortcut,
+			"lightmap_ok": course.lightmap_ok}
 	bot.queue_free()
 	course.queue_free()
 	await get_tree().physics_frame
