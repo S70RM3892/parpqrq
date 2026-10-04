@@ -1,7 +1,7 @@
 extends Node
 ## 画面を撮る（見た目の確認用）。オートロードが読まれるよう、普通に起動する:
 ##   godot --path . res://tools/capture.tscn -- --scene=res://scenes/levels/test_course.tscn --out=/tmp/shot --at=1.0,3.0 [--forward]
-## --at の秒数ごとに <out>_<n>.png を保存して終了する。--forward で前進を押し続ける。--speed=14 で前へ押し出す。--pos=x,y,z で置き直す。--course=2-1 --node=40 でコースの道しるべに置く。
+## --at の秒数ごとに <out>_<n>.png を保存して終了する。--forward で前進を押し続ける。--speed=14 で前へ押し出す。--pos=x,y,z で置き直す。--course=2-1 --node=40 でコースの道しるべに置く。--page=controls でタイトルの画面を開く。
 ## ディスプレイが無い環境では xvfb-run で包む。
 
 var _out: String = "user://capture"
@@ -12,6 +12,7 @@ var _speed: float = 0.0  ## >0 なら前へこの速さで押し出す（スピ�
 var _pos: Vector3 = Vector3.INF  ## 置き直す位置（--pos=x,y,z）
 var _node: int = -1              ## コースの道しるべ N に置いて、次の道しるべを向く（--node=N）
 var _pitch: float = 0.0
+var _page: StringName = &""   ## タイトルの画面（--page=controls / courses / settings）
 
 
 func _ready() -> void:
@@ -35,10 +36,16 @@ func _ready() -> void:
 		elif a.begins_with("--pos="):
 			var v := a.trim_prefix("--pos=").split(",")
 			_pos = Vector3(v[0].to_float(), v[1].to_float(), v[2].to_float())
+		elif a.begins_with("--page="):
+			_page = StringName(a.trim_prefix("--page="))
 		elif a.begins_with("--speed="):
 			_speed = a.trim_prefix("--speed=").to_float()
 	DebugOverlay.visible = false
-	add_child((load(scene_path) as PackedScene).instantiate())
+	var scene := (load(scene_path) as PackedScene).instantiate()
+	add_child(scene)
+	if _page != &"" and scene.has_method(&"_show"):
+		Settings.first_run_done = true
+		scene.call_deferred(&"_show", _page)
 
 
 func _physics_process(_delta: float) -> void:
@@ -76,4 +83,4 @@ func _process(delta: float) -> void:
 		print("capture: ", path, "  player ", pl.global_position if pl else Vector3.ZERO, " state ", pl.state if pl else -1, " speed ", pl.horizontal_speed() if pl else 0.0, " fps ", Engine.get_frames_per_second())
 		_n += 1
 		if _n >= _at.size():
-			get_tree().quit()
+			Audio.quit_game()

@@ -35,6 +35,7 @@ const ROWS: Array[Array] = [
 
 var _list: VBoxContainer
 var _first: Control
+var _scroll: ScrollContainer
 
 
 func _ready() -> void:
@@ -55,6 +56,7 @@ func _ready() -> void:
 	presets.add_child(UITheme.button("Default preset", _default, 28))
 	v.add_child(presets)
 	var scroll := ScrollContainer.new()
+	_scroll = scroll
 	scroll.custom_minimum_size = Vector2(0, 640)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.follow_focus = true
@@ -70,6 +72,7 @@ func _ready() -> void:
 func open() -> void:
 	visible = true
 	_rebuild()
+	_scroll.set_deferred(&"scroll_vertical", 0)
 	if _first != null:
 		_first.grab_focus.call_deferred()
 
@@ -99,7 +102,9 @@ func _default() -> void:
 
 
 func _rebuild() -> void:
+	# すぐ外す（queue_free だけだと1フレーム古い行が残り、新しい行が下にずれてスクロールが狂う）
 	for c: Node in _list.get_children():
+		_list.remove_child(c)
 		c.queue_free()
 	_first = null
 	for r: Array in ROWS:
