@@ -3,7 +3,8 @@ extends Node
 ##   godot --headless --path . --fixed-fps 60 res://tests/course_test.tscn [-- --only=2-3]
 ## 各コースを2回走る：主ルートだけ（色付き）と、隠れた近道を全部通る走り。
 ## 合格：どちらも落ちずにゴール、近道はどれも主ルートより速い（MIN_SAVE 秒以上）、
-## メダルが走りに合っている（開発者 = 近道の走りでぎりぎり、ゴールド = 主ルートの走りで取れる）。
+## メダルが走りに合っている（開発者 = 近道の走りでぎりぎり、ゴールド = 主ルートの走りで取れる）、
+## 近道の発見：主ルートの走りでは1本も見つからず（ゴールドなので次の近道の目印が出る）、近道の走りでは全部見つかる。
 ## 終了コード 0 = 全コース合格。各コースのタイムとメダルの目安を出す。
 ## 記録は "test_<id>" のIDで取る（持ち主の自己ベストを上書きしない）。
 
@@ -49,6 +50,16 @@ func _run_course(c: Dictionary) -> String:
 			_failed += 1
 			ok = false
 			print("FAIL %s: shortcut %s is not faster (main %.2f s, shortcut %.2f s)" % [c.id, sc.name, tm, tsc])
+	# 発見の判定の箱が近道の上だけにあるか
+	var total: int = main.shortcuts.size()
+	if ok and (main.found != 0 or short.found != total):
+		_failed += 1
+		ok = false
+		print("FAIL %s: shortcuts found main %d (want 0), shortcuts run %d (want %d)" % [c.id, main.found, short.found, total])
+	if ok and total > 0 and main.hint != str(main.shortcuts[0].name):
+		_failed += 1
+		ok = false
+		print("FAIL %s: after a gold run the hint should mark %s (got '%s')" % [c.id, main.shortcuts[0].name, main.hint])
 	# メダル：開発者 = 近道の走り（0.5秒単位で切り上げ）、ゴールド = 主ルートの走りの105%
 	var medals: Array = c.medals
 	if ok and not (ts <= float(medals[0]) and float(medals[0]) < t and t <= float(medals[1])):
@@ -116,7 +127,7 @@ func _run_once(c: Dictionary, take_shortcuts: bool) -> Dictionary:
 				"to_dist": float(course.builder.nodes[int(sc.to)].dist)})
 	var out := {"ok": ok, "time": float(res.get("time", -1.0)), "passed": bot.passed, "crash": counts.crash,
 			"perfect": counts.perfect, "route_len": course.builder.route_len, "build_ms": course.build_ms,
-			"shortcuts": shortcuts}
+			"shortcuts": shortcuts, "found": course.timer.shortcuts_found(), "hint": course.hint_shortcut}
 	bot.queue_free()
 	course.queue_free()
 	await get_tree().physics_frame

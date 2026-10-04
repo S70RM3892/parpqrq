@@ -131,6 +131,15 @@ static func area_of(id: String) -> Dictionary:
 	return AREAS[int(c.get("area", 0))]
 
 
+## 隠れた近道の数（レシピの近道のある区間の行を数える。コースを組み立てずに分かる）
+static func shortcut_count(id: String) -> int:
+	var n := 0
+	for line: String in recipe(id):
+		if line.get_slice(" ", 0) in ["detour", "swinggap", "zipjog", "kickwall"]:
+			n += 1
+	return n
+
+
 ## 次のコース（無ければ空）
 static func next_id(id: String) -> String:
 	for i: int in COURSES.size() - 1:

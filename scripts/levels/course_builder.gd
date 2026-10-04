@@ -65,7 +65,7 @@ var splits: Array[Transform3D] = []
 var route_points: PackedVector3Array = []
 ## 隠れた近道（色を付けない）。{name, from: 主ルートの道しるべの番号（ここから分かれる）,
 ##  to: 戻る主ルートの道しるべの番号, nodes: 近道の道しるべ, found_xf / found_size: ここを通ったら発見（向きつきの箱）,
-##  found_states: 発見に数える状態（空 = どれでも）, hint: 金メダルの後に目印を出す所}
+##  found_states: 発見に数える状態の名前（Player.State のキー。空 = どれでも）, hint: 金メダルの後に目印を出す所}
 var shortcuts: Array[Dictionary] = []
 ## 掴める棒と線（スイングバー・ジップライン）。Course が GrabLines に渡す（GrabLines.bar / zip の形）
 var grab_lines: Array[Dictionary] = []
@@ -197,7 +197,7 @@ func _bn(p: Vector3, act: Act = Act.NONE, lead_t: float = 0.0, lead_c: float = 0
 
 ## 近道を登録する。from / to = 主ルートの道しるべの番号。found = 発見の判定の箱（frame 基準の位置と大きさ）
 func _shortcut(sc_name: String, from: int, to: int, sc_nodes: Array[Dictionary], found_xf: Transform3D,
-		found_size: Vector3, found_states: Array[int], hint: Vector3) -> void:
+		found_size: Vector3, found_states: Array[String], hint: Vector3) -> void:
 	shortcuts.append({"name": sc_name, "from": from, "to": to, "nodes": sc_nodes, "found_xf": found_xf,
 			"found_size": found_size, "found_states": found_states, "hint": hint})
 
@@ -684,7 +684,7 @@ func _swing_gap(g: float) -> void:
 		_bn(land),
 	]
 	_shortcut("swing", from, to, sc, Transform3D(xf.basis, xf * Vector3(0, BAR_H - 0.8, -BAR_Z)), Vector3(5.0, 3.0, 4.0),
-			[Player.State.SWING], xf * Vector3(0, BAR_H, -BAR_Z))
+			["SWING"], xf * Vector3(0, BAR_H, -BAR_Z))
 	_keep_clear(edge, land, 3.2)
 
 
@@ -733,7 +733,7 @@ func _zip_jog(side: float) -> void:
 	]
 	var mid := (a + b) * 0.5
 	_shortcut("zipline", from, to, sc, Transform3D(xf.basis, Vector3(mid.x, y0 + 0.5, mid.z)), Vector3(4.0, 9.0, 10.0),
-			[Player.State.ZIPLINE], a - north * 1.0)
+			["ZIPLINE"], a - north * 1.0)
 	_keep_clear(a, b, 2.5)
 
 
@@ -936,7 +936,8 @@ func _backdrop_points() -> void:
 
 ## フリーラン：時間制限なしの大きい区画（仕様書 7章）。手触りを味わう場所で、テスト場も兼ねる。
 ## n×n のビルを路地（3〜5 m）で区切って並べる。高さはなめらかな乱れで決め、隣との段差に応じて
-## 足場（木箱）・ウォールランの壁・梁・下り坂を置いて、どこからでもどこかへ行けるようにする。
+## 足場（木箱）・ウォールランの壁・梁・下り坂・ジップライン（高い屋上から低い屋上へ）・スイングバー（路地の上）を置いて、
+## どこからでもどこかへ行けるようにする。
 func build_district(n: int = 7) -> void:
 	var pitch := 21.0
 	var noise := FastNoiseLite.new()
@@ -1019,6 +1020,14 @@ func _connect(a: Vector3, sa: float, b: Vector3, sb: float, axis: Vector3) -> vo
 		var mid := (start + end) * 0.5
 		var nrm := Basis.from_euler(Vector3(deg_to_rad(-pitch_deg), deg_to_rad(y_deg + 180.0), 0)) * Vector3.UP
 		geo.add_box(mid - nrm * 0.25, Vector3(4.0, 0.5, length + 0.4), Mat.ROUTE, Vector3(-pitch_deg, y_deg + 180.0, 0))
+	if dh > 3.0 and rng.randf() < 0.55:
+		# ジップライン：高い屋上の縁から跳んで掴み、低い屋上の奥まで滑り降りる（木箱・坂とは横にずらす）
+		offset = lateral * (rng.randf_range(4.5, 6.5) * (1.0 if rng.randf() < 0.5 else -1.0))
+		var top := hi - toward * (s_hi * 0.5 - 1.0) + offset
+		top.y = hi.y + 2.6
+		var low := lo + toward * (s_lo * 0.5 - 6.0) + offset
+		low.y = lo.y + 3.3
+		_zip_cable(top, low, lateral, hi.y, lo.y)
 	if dh < 1.0 and r < 0.35:
 		# 路地をまたぐ看板の壁（ウォールラン）
 		var wall_c := gap_mid + lateral * rng.randf_range(-5.0, 5.0)
@@ -1026,6 +1035,16 @@ func _connect(a: Vector3, sa: float, b: Vector3, sb: float, axis: Vector3) -> vo
 		var bottom := STREET_Y
 		geo.add_box(Vector3(wall_c.x, (top + bottom) * 0.5, wall_c.z), Vector3(0.5, top - bottom, pitch_gap(a, b, sa, sb) + 10.0),
 				Mat.ROUTE, Vector3(0, y_deg, 0))
+	elif dh < 1.5 and r > 0.75 and pitch_gap(a, b, sa, sb) > 3.0:
+		# 路地の上のスイングバー（両端の支柱は通りから立つ）
+		var bc := gap_mid + lateral * rng.randf_range(-4.0, 4.0)
+		var by := maxf(a.y, b.y) + 2.45
+		var ba := Vector3(bc.x, by, bc.z) - lateral * 2.8
+		var bb := Vector3(bc.x, by, bc.z) + lateral * 2.8
+		geo.add_beam(ba, bb, 0.05, Mat.METAL, NC, 10)
+		grab_lines.append(GrabLines.bar(ba, bb))
+		for e: Vector3 in [ba - lateral * 0.25, bb + lateral * 0.25]:
+			geo.add_beam(Vector3(e.x, STREET_Y, e.z), Vector3(e.x, by + 0.5, e.z), 0.06, Mat.METAL, 0, 8)
 	elif dh < 1.5 and r < 0.6:
 		# 梁
 		var p0 := a + offset

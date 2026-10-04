@@ -58,7 +58,9 @@ const GRAB_LO := 1.25         ## m。足元からこの高さ〜GRAB_HI の棒�
 const GRAB_HI := 2.35
 const GRAB_COOLDOWN := 0.35   ## s。離した直後の同じ棒・線は掴まない
 const SWING_COM := 0.9        ## m。足元から重心まで（スイングの振り子の先）
-const SWING_HEAD := 0.35      ## m。バーから頭まで（スイング中の目はバーの近くで小さく回る）
+const GRIP_EYE_BACK := 0.85   ## m。スイング・ジップライン中、目を握る所のこれだけ後ろに置く（握った手とバーが画面の上に見える）
+const GRIP_EYE_DOWN := 0.4    ## m。同じく下
+const SWING_EYE_ARC := 0.15   ## m。スイングの振れに合わせて目が回る半径（大きいと酔う）
 const ZIP_HANG := 2.0         ## m。ジップラインの線から足元まで
 const ZIP_END := 0.6          ## m。線の終点のこれだけ手前で自動で離す
 
@@ -1111,7 +1113,8 @@ func _start_zip(r: Dictionary) -> void:
 	_zip_d = r.d
 	_zip_speed = clampf(maxf(velocity.dot(_zip_u), horizontal_speed() * 0.6), 2.0, params.zip_max_speed)
 	var grip: Vector3 = r.point
-	move = _grip(grip, Vector3(_zip_u.x, 0.0, _zip_u.z).normalized())
+	# 指先は線を横切る向き（両手が線に沿って前後に並ぶ）
+	move = _grip(grip, Vector3(_zip_u.x, 0.0, _zip_u.z).normalized().cross(Vector3.UP))
 	_since_jump_press = INF
 	_pending_time = -1.0
 	_add_momentum(params.momentum_gain_small)
@@ -1195,12 +1198,18 @@ func _snap_body(feet: Vector3) -> void:
 	global_position = feet
 
 
-## 目の位置：ふだんは足元の真上 EYE_HEIGHT。スイング中は頭（バーの少し下）が振り子に沿って小さく回る
+## 目の位置：ふだんは足元の真上 EYE_HEIGHT。
+## スイング・ジップライン中は握る所の少し後ろ下（バー・線と握った手が画面の上に見える：手が見えた瞬間が「掴んだ」確信）。
+## スイングでは振れに合わせて小さく回る
 func _update_eye(delta: float) -> void:
 	var target := Vector3.UP * EYE_HEIGHT
 	if state == State.SWING:
 		var arm := _swing_f * sin(swing_angle) - Vector3.UP * cos(swing_angle)
-		target = (_swing_pivot + arm * SWING_HEAD) - global_position
+		var eye := _swing_pivot - _swing_f * GRIP_EYE_BACK - Vector3.UP * GRIP_EYE_DOWN + (arm + Vector3.UP) * SWING_EYE_ARC
+		target = eye - global_position
+	elif state == State.ZIPLINE and move != null:
+		var back := Vector3(_zip_u.x, 0.0, _zip_u.z).normalized()
+		target = (move.hand - back * GRIP_EYE_BACK - Vector3.UP * GRIP_EYE_DOWN) - global_position
 	_eye_off = _eye_off.lerp(target, 1.0 - exp(-delta / EYE_SMOOTH))
 	_eye.global_position = global_position + _eye_off
 

@@ -224,7 +224,8 @@ func _refresh_courses() -> void:
 			btn.text = "Free Run\nno timer"
 		else:
 			var r := Game.record(id)
-			btn.text = "%s  %s\n%s%s" % [id, c.name, UITheme.format_time(r.best), "   ghost" if r.ghost else ""]
+			btn.text = "%s  %s\n%s%s   shortcuts %d/%d" % [id, c.name, UITheme.format_time(r.best), "   ghost" if r.ghost else "",
+					r.shortcuts, r.shortcuts_total]
 			var icon := btn.get_node("Medal") as MedalIcon
 			icon.medal = r.medal
 			icon.route_off = r.route_off
@@ -244,8 +245,8 @@ func _describe(id: String) -> void:
 	var c := CourseCatalog.get_course(id)
 	var m: Array = c.medals
 	var r := Game.record(id)
-	_info.text = "%s  %s      best %s\nDEV %s   GOLD %s   SILVER %s   BRONZE %s" % [
-			id, c.name, UITheme.format_time(r.best),
+	_info.text = "%s  %s      best %s      hidden shortcuts found %d / %d\nDEV %s   GOLD %s   SILVER %s   BRONZE %s      (DEV needs the shortcuts)" % [
+			id, c.name, UITheme.format_time(r.best), r.shortcuts, r.shortcuts_total,
 			UITheme.format_time(m[0]), UITheme.format_time(m[1]), UITheme.format_time(m[2]), UITheme.format_time(m[3])]
 
 
@@ -266,6 +267,13 @@ const MOVES: PackedStringArray = [
 	"Slide: crouch while running; slopes keep you accelerating. Jump out of a slide for +8%.",
 	"Roll: crouch just before landing a drop of 2 m or more. Exactly on landing = Perfect.",
 	"Pull back on the stick to brake. Chain moves without stopping to build momentum (the orange glow at the screen edge).",
+	"Wall kick: jump the moment you touch a wall in the air. Hold toward the wall to kick upward (reach a higher ledge), or away to bounce off.",
+	"Vertical wall run + kick: hold toward the wall and jump at the top of the run to reach about 0.8 m higher.",
+	"Vault jump: press jump again while you are on top of the obstacle to launch from it. Pushing off its far edge = Perfect.",
+	"Swing bar: jump at a horizontal bar to grab it. Release with jump: early = long and low, around 35 degrees = Perfect, late = high.",
+	"Zipline: jump at a cable to grab it and slide down. Jump off just before the end for a Perfect.",
+	"Hanging from a ledge: look back and jump (or quick turn) to kick off the wall behind you.",
+	"Hidden shortcuts: the orange route is the safe way. Faster lines hide in scaffolds, AC units, stair houses and cables. Look for scuff marks.",
 ]
 
 
@@ -280,23 +288,29 @@ func _controls_page() -> Control:
 	v.add_theme_constant_override(&"separation", 10)
 	v.custom_minimum_size.x = 1400
 	m.add_child(v)
-	v.add_child(UITheme.label("Controls", 48))
+	v.add_child(UITheme.label("Controls", 40))
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override(&"h_separation", 40)
-	grid.add_theme_constant_override(&"v_separation", 6)
+	grid.add_theme_constant_override(&"v_separation", 0)
 	for h: String in ["", "Controller", "Keyboard + mouse"]:
-		grid.add_child(UITheme.label(h, 22, UITheme.ACCENT))
+		grid.add_child(UITheme.label(h, 20, UITheme.ACCENT))
 	for row: Array in CONTROLS:
 		for i: int in 3:
-			grid.add_child(UITheme.label(row[i], 26, UITheme.INK if i == 0 else UITheme.MUTED))
+			grid.add_child(UITheme.label(row[i], 22, UITheme.INK if i == 0 else UITheme.MUTED))
 	v.add_child(grid)
 	v.add_child(UITheme.label("Moves", 22, UITheme.ACCENT))
+	# 技は2列（1.1で増えたので1列だと画面に収まらない）
+	var moves := GridContainer.new()
+	moves.columns = 2
+	moves.add_theme_constant_override(&"h_separation", 36)
+	moves.add_theme_constant_override(&"v_separation", 4)
 	for line: String in MOVES:
-		var l := UITheme.label(line, 24, UITheme.INK)
+		var l := UITheme.label(line, 19, UITheme.INK)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.custom_minimum_size.x = 1300
-		v.add_child(l)
+		l.custom_minimum_size.x = 680
+		moves.add_child(l)
+	v.add_child(moves)
 	v.add_child(UITheme.button("Back", func() -> void: _show(&"main"), 30))
 	return panel
 

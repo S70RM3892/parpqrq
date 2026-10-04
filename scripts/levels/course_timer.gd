@@ -6,17 +6,21 @@ extends Node3D
 ## - ゴールでタイム・差・メダル・次のメダルまで・最高速度・Perfect数（finished シグナル。白箱コースは上の表示にも出す）
 ## - 自己ベストの走りをゴースト（半透明の自分）として次のプレイに出す。走りは全部記録してリプレイに使う
 ## - ルートカラーOFFでクリアしたら印を残す（仕様書 6章）
+## - 隠れた近道を通ったら「発見」として残す（Neon White の近道探しにならう）。初めて通った時だけ上に1.5秒出す
 ## 走行中はそれ以外何も出さない（仕様書 8章）。
 
 signal started
 signal split_passed(index: int, time: float, diff: float)
 signal finished(result: Dictionary)
+## 隠れた近道を初めて通った。found = これまでに見つけた数
+signal shortcut_found(shortcut_name: String, found: int, total: int)
 
 const SAVE_PATH := "user://best_times.cfg"
 const SPLIT_SHOW := 1.5
 const RESULT_SHOW := 6.0
 const MEDALS: PackedStringArray = ["DEV", "GOLD", "SILVER", "BRONZE"]
 const GREEN := Color(0.4, 1.0, 0.5)
+const GOLD := Color(1.0, 0.85, 0.35)
 const RED := Color(1.0, 0.45, 0.4)
 
 @export var course_id: String = "test_course"
@@ -42,6 +46,12 @@ var _max_speed: float = 0.0
 var _perfects_at_start: int = 0
 var _player: Player
 var _ghost_body: GhostBody
+## 隠れた近道（Course が渡す：CourseBuilder.shortcuts）。{name, found_xf, found_size, found_states（状態の名前）, ...}
+var shortcuts: Array[Dictionary] = []
+## これまでに見つけた近道の名前（保存する）／この走りで通った近道／この走りで初めて見つけた近道
+var _found: Dictionary = {}
+var _found_run: Dictionary = {}
+var _new_run: int = 0
 
 @onready var _label: Label = $HUD/Time
 @onready var _ghost: Node3D = $Ghost
@@ -129,6 +139,8 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _player != null and not shortcuts.is_empty() and Engine.get_physics_frames() % 2 == 0:
+		_check_shortcuts()
 	if not running:
 		return
 	elapsed += delta
@@ -143,6 +155,8 @@ func _on_respawned(to_start: bool) -> void:
 	if to_start:
 		running = false
 		_ghost.visible = false
+		_found_run.clear()
+		_new_run = 0
 
 
 func _on_start_exited(body: Node3D) -> void:
@@ -154,6 +168,8 @@ func _on_start_exited(body: Node3D) -> void:
 	_max_speed = 0.0
 	_perfects_at_start = _player.perfect_count
 	_splits = []
+	_found_run.clear()
+	_new_run = 0
 	recording.clear()
 	_ghost.visible = best_run.size() > 0
 	started.emit()
@@ -195,6 +211,8 @@ func _on_goal_entered(body: Node3D) -> void:
 		"time": t, "medal": medal, "max_speed": _max_speed, "perfects": perfects, "best": _best,
 		"prev_best": prev, "new_best": new_best, "route_off": route_off,
 		"next_medal": next.get("medal", ""), "next_time": next.get("time", 0.0),
+		"shortcuts_total": shortcuts.size(), "shortcuts_found": _found.size(),
+		"shortcuts_used": _found_run.size(), "new_shortcuts": _new_run,
 	}
 	if show_result_label:
 		var lines: PackedStringArray = []
@@ -216,13 +234,67 @@ func use_records(id: String, clear: bool) -> void:
 	if clear:
 		var cfg := ConfigFile.new()
 		if cfg.load(SAVE_PATH) == OK:
-			for section: String in ["best", "splits", "route_off"]:
+			for section: String in ["best", "splits", "route_off", "shortcuts"]:
 				if cfg.has_section_key(section, id):
 					cfg.erase_section_key(section, id)
 			cfg.save(SAVE_PATH)
 		if FileAccess.file_exists(_ghost_path()):
 			DirAccess.remove_absolute(_ghost_path())
 	_load()
+
+
+## 隠れた近道を渡す（発見の判定に使う）
+func set_shortcuts(list: Array[Dictionary]) -> void:
+	shortcuts = list
+
+
+## これまでに見つけた近道の数
+func shortcuts_found() -> int:
+	return _found.size()
+
+
+func is_shortcut_found(shortcut_name: String) -> bool:
+	return _found.has(shortcut_name)
+
+
+## 見つけた近道の名前（保存してある分）
+static func found_shortcuts(id: String) -> PackedStringArray:
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_PATH) != OK:
+		return PackedStringArray()
+	return cfg.get_value("shortcuts", id, PackedStringArray())
+
+
+## 近道の判定の箱に体の中心が入っていて、状態も合っていれば「通った」
+func _check_shortcuts() -> void:
+	var center := _player.global_position + Vector3.UP * 0.9
+	for sc: Dictionary in shortcuts:
+		var sc_name: String = sc.name
+		if _found_run.has(sc_name):
+			continue
+		var states: Array = sc.get("found_states", [])
+		if not states.is_empty() and not states.has(Player.State.find_key(_player.state)):
+			continue
+		var local := (sc.found_xf as Transform3D).affine_inverse() * center
+		var half := (sc.found_size as Vector3) * 0.5
+		if absf(local.x) > half.x or absf(local.y) > half.y or absf(local.z) > half.z:
+			continue
+		_found_run[sc_name] = true
+		if _found.has(sc_name):
+			continue
+		_found[sc_name] = true
+		_new_run += 1
+		_save_found()
+		_show("SHORTCUT FOUND  %d / %d" % [_found.size(), shortcuts.size()], GOLD, SPLIT_SHOW)
+		Audio.ui(&"split", 1.25)
+		shortcut_found.emit(sc_name, _found.size(), shortcuts.size())
+
+
+func _save_found() -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(SAVE_PATH)
+	cfg.set_value("shortcuts", course_id, PackedStringArray(_found.keys()))
+	cfg.save(SAVE_PATH)
 
 
 func ghost_samples() -> int:
@@ -275,9 +347,12 @@ func _ghost_path() -> String:
 
 func _load() -> void:
 	var cfg := ConfigFile.new()
+	_found.clear()
 	if cfg.load(SAVE_PATH) == OK:
 		_best = cfg.get_value("best", course_id, INF)
 		_best_splits = cfg.get_value("splits", course_id, PackedFloat32Array())
+		for n: String in cfg.get_value("shortcuts", course_id, PackedStringArray()):
+			_found[n] = true
 	if FileAccess.file_exists(_ghost_path()):
 		var f := FileAccess.open(_ghost_path(), FileAccess.READ)
 		var data: Variant = f.get_var()
