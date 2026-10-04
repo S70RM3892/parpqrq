@@ -18,7 +18,11 @@ extends RefCounted
 ##   walljump 3 L      左右の壁を交互に3回蹴って隙間を越える
 ##   beam 12           細い梁（幅1 m）を渡る
 ##   turn L            左へ曲がる（広い屋上の角）
-##   detour R jump     右へ回り込む主ルート。真っすぐ跳べば近道（jump / wallrun。近道は色を付けない）
+##   detour R jump     右へ回り込む主ルート。真っすぐ越えれば近道（jump / wallrun / vault / swing。近道は色を付けない）
+## 隠れた近道のある区間（主ルートは色付きで迷わず走れる。近道は色を付けず、屋上の物の中に隠す：仕様書 7章）:
+##   swinggap 11       主ルートは一段低い屋上へ飛び降りて向こうの壁を登る。足場の横棒でスイングすれば上のまま越える
+##   zipjog R          主ルートは横へずれて橋を渡り戻る（角4つ）。塔屋に登って電線（ジップライン）で谷を真っすぐ渡れば近道
+##   kickwall 4.6      高い壁。主ルートは横の木箱を段にして3回で登る。縦ウォールランの頂点で壁を蹴り上がれば正面から登れる
 ##   width 6           これからの屋上の幅
 ##   floor gravel      これからの屋上の床（concrete / gravel / metal / glass）
 ##   cp                チェックポイント
@@ -31,7 +35,11 @@ const STEP_RUN := 0.8
 const Mat := LevelStyle.Mat
 const NC := LevelGeometry.NO_COLLIDE
 
-enum Act { NONE, JUMP, CROUCH, WALLJUMP }
+## 道しるべで自動走行がする操作。
+## VAULT_JUMP = ヴォルトに入り、障害物の上でもう一度押す / SWING = スイング中、理想の角度で離す /
+## ZIP = ジップラインの終点の少し手前で離す / CLIMB_KICK = 縦ウォールランの頂点で壁を蹴り上がる /
+## WALLRUN_JUMP = 横ウォールラン中、道しるべに着いたら壁を蹴る
+enum Act { NONE, JUMP, CROUCH, WALLJUMP, VAULT_JUMP, SWING, ZIP, CLIMB_KICK, WALLRUN_JUMP }
 
 var geo: LevelGeometry
 var theme: Dictionary
@@ -55,6 +63,12 @@ var goal_xf: Transform3D
 var checkpoints: Array[Transform3D] = []
 var splits: Array[Transform3D] = []
 var route_points: PackedVector3Array = []
+## 隠れた近道（色を付けない）。{name, from: 主ルートの道しるべの番号（ここから分かれる）,
+##  to: 戻る主ルートの道しるべの番号, nodes: 近道の道しるべ, found_xf / found_size: ここを通ったら発見（向きつきの箱）,
+##  found_states: 発見に数える状態（空 = どれでも）, hint: 金メダルの後に目印を出す所}
+var shortcuts: Array[Dictionary] = []
+## 掴める棒と線（スイングバー・ジップライン）。Course が GrabLines に渡す（GrabLines.bar / zip の形）
+var grab_lines: Array[Dictionary] = []
 
 var _floor_open: bool = false
 var _floor_start: Vector3
@@ -67,6 +81,10 @@ var _cp_requests: Array[float] = []
 var _decor: Array[Dictionary] = []
 ## 区間の印・チェックポイントを置かない範囲（技の途中）
 var _busy: bool = false
+## 飾りを置かない所（近道の通り道）。{a: Vector2, b: Vector2, r: float}（水平面の線分と半径）
+var _clear: Array[Dictionary] = []
+## 近道のある区間の途中（主ルートだけが通る所に区間の印・チェックポイントを置かない）
+var _in_section: bool = false
 
 
 func _init(p_geo: LevelGeometry, p_theme: Dictionary, seed_value: int) -> void:
@@ -142,6 +160,12 @@ func _step(t: PackedStringArray) -> void:
 			_turn(1.0 if s.call(1, "R") == "R" else -1.0)
 		"detour":
 			_detour(1.0 if s.call(1, "R") == "R" else -1.0, s.call(2, "jump"))
+		"swinggap":
+			_swing_gap(a.call(1, 11.0))
+		"zipjog":
+			_zip_jog(1.0 if s.call(1, "R") == "R" else -1.0)
+		"kickwall":
+			_kick_wall(a.call(1, 4.6))
 		"width":
 			width = a.call(1, 10.0)
 		"floor":
@@ -162,8 +186,73 @@ func _node(p: Vector3, act: Act = Act.NONE, lead_t: float = 0.0, lead_c: float =
 
 
 func _safe_here() -> void:
-	if not _busy:
+	if not _busy and not _in_section:
 		safe.append({"xf": frame(), "dist": route_len})
+
+
+## 近道の道しるべ（主ルートの距離には数えない）
+func _bn(p: Vector3, act: Act = Act.NONE, lead_t: float = 0.0, lead_c: float = 0.0) -> Dictionary:
+	return {"p": p, "act": act, "lead_t": lead_t, "lead_c": lead_c, "dist": -1.0}
+
+
+## 近道を登録する。from / to = 主ルートの道しるべの番号。found = 発見の判定の箱（frame 基準の位置と大きさ）
+func _shortcut(sc_name: String, from: int, to: int, sc_nodes: Array[Dictionary], found_xf: Transform3D,
+		found_size: Vector3, found_states: Array[int], hint: Vector3) -> void:
+	shortcuts.append({"name": sc_name, "from": from, "to": to, "nodes": sc_nodes, "found_xf": found_xf,
+			"found_size": found_size, "found_states": found_states, "hint": hint})
+
+
+## 自動走行の道：主ルートだけ、または全部の近道を通る道
+func route(take_shortcuts: bool) -> Array[Dictionary]:
+	if not take_shortcuts:
+		return nodes
+	var out: Array[Dictionary] = []
+	var i := 0
+	while i < nodes.size():
+		out.append(nodes[i])
+		var next := i + 1
+		for sc: Dictionary in shortcuts:
+			if int(sc.from) == i:
+				out.append_array(sc.nodes)
+				next = int(sc.to)
+				break
+		i = next
+	return out
+
+
+## 飾りを置かない通り道（a→b、半径 r）
+func _keep_clear(a: Vector3, b: Vector3, r: float) -> void:
+	_clear.append({"a": Vector2(a.x, a.z), "b": Vector2(b.x, b.z), "r": r})
+
+
+func _is_clear(p: Vector3, margin: float) -> bool:
+	var q := Vector2(p.x, p.z)
+	for c: Dictionary in _clear:
+		var a: Vector2 = c.a
+		var b: Vector2 = c.b
+		var ab := b - a
+		var t := clampf((q - a).dot(ab) / maxf(ab.length_squared(), 1e-6), 0.0, 1.0)
+		if q.distance_to(a + ab * t) < float(c.r) + margin:
+			return false
+	return true
+
+
+## 擦り跡（近道の踏み切り・手を着く所に、先に通った人の靴跡が残っている。色は付けない：気づいた人へのご褒美）。
+## xf の足元の面に n 個、横 spread × 奥 depth に散らす。wall = true なら xf の -Z 向きの壁面に縦に付ける
+func _scuffs(xf: Transform3D, n: int, spread: float, depth: float, wall: bool = false) -> void:
+	for i: int in n:
+		var x := rng.randf_range(-spread, spread) * 0.5
+		var z := rng.randf_range(-depth, depth) * 0.5
+		var len := rng.randf_range(0.18, 0.32)
+		var tint := Color(0.55, 0.55, 0.55)
+		if wall:
+			var c := xf * Vector3(x, 0.4 + z + depth * 0.5, 0.012)
+			geo.add_box(c, Vector3(0.09, len, 0.01), Mat.DARK, Vector3(0, rad_to_deg(xf.basis.get_euler().y), rng.randf_range(-25, 25)),
+					NC | LevelGeometry.NO_SHADOW, tint)
+		else:
+			var c2 := xf * Vector3(x, 0.006, z)
+			geo.add_box(c2, Vector3(0.1, 0.01, len), Mat.DARK, Vector3(0, rad_to_deg(xf.basis.get_euler().y) + rng.randf_range(-20, 20), 0),
+					NC | LevelGeometry.NO_SHADOW, tint)
 
 
 # --- 屋上 --------------------------------------------------------------------
@@ -448,12 +537,14 @@ func _beam(length: float, bw: float) -> void:
 	_busy = false
 
 
-## 曲がり角：今の屋上を角の先まで延ばして閉じ、向きを変えて角の端から次の屋上を始める
-func _turn(sign_value: float) -> void:
+## 曲がり角：今の屋上を角の先まで延ばして閉じ、向きを変えて角の端から次の屋上を始める。
+## extra = 角の先へ延ばす長さ（既定は幅の半分 = 角の正方形）
+func _turn(sign_value: float, extra: float = -1.0) -> void:
 	_node(pos)
 	var w := _floor_width
+	var ext := w * 0.5 if extra < 0.0 else extra
 	_floor_parapet = false
-	_close_floor(w * 0.5, w + 1.0)
+	_close_floor(ext, ext + w * 0.5 + 1.0)
 	yaw -= sign_value * PI * 0.5
 	_open_floor(pos + dir() * (w * 0.5))
 	_floor_parapet = false
@@ -462,10 +553,11 @@ func _turn(sign_value: float) -> void:
 	_busy = false
 
 
-## 回り込み：真ん中に穴（中庭）があり、主ルートは片側の通路を回る。真っすぐ越えれば近道（色を付けない）
-## kind = jump（5 mの穴を跳ぶ）/ wallrun（10 mの穴を横切る壁を走る）
+## 回り込み：真ん中に穴（中庭）があり、主ルートは片側の通路を回る。真っすぐ越えれば近道（色を付けない）。
+## kind = jump（5 mの穴を跳ぶ）/ wallrun（10 mの穴を横切る壁を走る）/
+## vault（7.2 mの穴の縁に室外機。ヴォルトジャンプで越える）/ swing（11 mの穴の上に足場の横棒。スイングで越える）
 func _detour(side: float, kind: String) -> void:
-	var hole := 5.0 if kind == "jump" else 10.0
+	var hole: float = {"jump": 5.0, "wallrun": 10.0, "vault": 7.2, "swing": 11.0}.get(kind, 5.0)
 	var near := 6.0   # 穴の手前の床（曲がり始める余裕）
 	var far := 6.0
 	var hw := 3.0     # 穴の半分の幅（主ルートの中心から反対側へ）
@@ -486,11 +578,40 @@ func _detour(side: float, kind: String) -> void:
 		CourseProps.box(geo, xf, Vector3(side * mid_lat, (STREET_Y - y) * 0.5, -fc), Vector3(w, y - STREET_Y, fl), Mat.BUILDING, 0, tint)
 	CourseProps.box(geo, xf, Vector3(side * (hw + corridor * 0.5), (STREET_Y - y) * 0.5, -(near + hole * 0.5)),
 			Vector3(corridor, y - STREET_Y, hole), Mat.BUILDING, 0, tint)
-	if kind == "wallrun":
-		# 穴を横切る壁（近道。色なし）
-		CourseProps.box(geo, xf, Vector3(-side * 1.0, (STREET_Y - y + 4.5) * 0.5, -(near + hole * 0.5)),
-				Vector3(0.5, 4.5 - STREET_Y + y, hole + 2.0), Mat.BUILDING, 0, tint)
+	var act := Act.JUMP
+	var lead := Vector2(0.03, 0.25)
+	var takeoff := -near
+	match kind:
+		"wallrun":
+			# 穴を横切る壁（色なし）
+			CourseProps.box(geo, xf, Vector3(-side * 1.0, (STREET_Y - y + 4.5) * 0.5, -(near + hole * 0.5)),
+					Vector3(0.5, 4.5 - STREET_Y + y, hole + 2.0), Mat.BUILDING, 0, tint)
+		"vault":
+			# 穴の縁に並んだ室外機（色なし）。普通に跳ぶには遠い。上でもう一度跳べば届く
+			for x: float in [-1.45, -0.48, 0.48, 1.45]:
+				CourseProps.ac_unit(geo, xf * Transform3D(Basis(Vector3.UP, PI), Vector3(x, 0, -(near - 0.33))))
+			# 当たり判定は列ごと1つ（室外機の隙間をすり抜けてヴォルトが出ないことがないように）
+			CourseProps.box(geo, xf, Vector3(0, 0.375, -(near - 0.33)), Vector3(3.8, 0.75, 0.62), Mat.METAL, LevelGeometry.NO_VISUAL)
+			_scuffs(Transform3D(xf.basis, xf * Vector3(0, 0.75, -(near - 0.33))), 4, 1.6, 0.4)
+			act = Act.VAULT_JUMP
+			lead = Vector2(0.15, 0.35)
+			takeoff = -(near - 0.64)
+		"swing":
+			# 穴の上の足場：横棒（色なし）と支柱。支柱は通りから立つ
+			var bz := near + 4.5
+			var bh := 2.45
+			var bar_a := xf * Vector3(-2.8, bh, -bz)
+			var bar_b := xf * Vector3(2.8, bh, -bz)
+			geo.add_beam(bar_a, bar_b, 0.05, Mat.METAL, NC, 10)
+			grab_lines.append(GrabLines.bar(bar_a, bar_b))
+			for sx: float in [-1.0, 1.0]:
+				var post := Vector3(sx * 3.05, 0, -bz)
+				geo.add_beam(xf * Vector3(post.x, STREET_Y - y, post.z), xf * Vector3(post.x, bh + 0.5, post.z), 0.06, Mat.METAL, 0, 8)
+				geo.add_beam(xf * Vector3(post.x, bh, post.z), xf * Vector3(post.x, bh, post.z - 1.8), 0.04, Mat.METAL, NC, 6)
+				geo.add_beam(xf * Vector3(post.x, STREET_Y - y, post.z - 1.8), xf * Vector3(post.x, bh + 0.5, post.z - 1.8), 0.045, Mat.METAL, NC, 8)
+			geo.add_beam(xf * Vector3(-3.05, bh + 0.5, -bz - 1.8), xf * Vector3(3.05, bh + 0.5, -bz - 1.8), 0.04, Mat.METAL, NC, 6)
 	_busy = true
+	var from := nodes.size() - 1
 	var c := side * (hw + corridor * 0.5)
 	_node(pos + dir() * (near * 0.5) + right() * c * 0.7)
 	_node(pos + dir() * near + right() * c)
@@ -498,9 +619,202 @@ func _detour(side: float, kind: String) -> void:
 	_node(pos + dir() * (near + hole + far * 0.5) + right() * c * 0.7)
 	pos += dir() * (near + hole + far)
 	_node(pos)
+	var to := nodes.size() - 1
 	_open_floor()
 	_walk(3.0)
 	_busy = false
+	# 近道：穴を真っすぐ越える
+	var sc: Array[Dictionary] = [_bn(xf * Vector3(0, 0, takeoff), act, lead.x, lead.y)]
+	if kind == "swing":
+		sc.append(_bn(xf * Vector3(0, 0, -(near + 4.5)), Act.SWING))
+	sc.append(_bn(xf * Vector3(0, 0, -(near + hole + 2.0))))
+	_shortcut("detour_" + kind, from, to, sc, Transform3D(xf.basis, xf * Vector3(0, 2.0, -(near + hole * 0.5))),
+			Vector3(hw * 2.0 - 1.0, 3.0, hole - 1.0), [], xf * Vector3(0, 1.0, -near))
+	if kind != "vault":
+		_scuffs(Transform3D(xf.basis, xf * Vector3(0, 0, -(near - 0.6))), 5, 1.4, 1.0)
+	_keep_clear(xf * Vector3(0, 0, -near), xf * Vector3(0, 0, -(near + hole)), 1.0)
+
+
+# --- 近道のある区間（仕様書 7章「主ルート＋近道」）--------------------------------------------
+# 主ルートは今までどおり色付きで迷わず走れる。近道は色を付けず、屋上の物（足場・室外機・塔屋・電線・看板）の
+# 中に隠す。近道は難しいが速い。失敗しても主ルートに落ちるだけにして、即死にしない（試しやすい）。
+
+## スイングバーの近道。主ルート：縁から一段低い屋上へ飛び降り（ローリング）、g m 先の壁を縦ウォールランで登る。
+## 近道：縁から跳んで工事の足場の横棒（縁から4.5 m・高さ2.45 m）を掴み、振って離せば上の高さのまま向こうへ着く
+func _swing_gap(g: float) -> void:
+	const DROP := 3.6
+	const BAR_Z := 4.5
+	const BAR_H := 2.45
+	const POST_X := 3.05
+	_in_section = true
+	var from := nodes.size() - 1
+	var xf := frame()
+	var edge := pos
+	_scuffs(Transform3D(xf.basis, xf * Vector3(0, 0, 0.7)), 5, 1.4, 1.0)
+	_drop(DROP)
+	_busy = true
+	_walk(g - 3.0)
+	_up(DROP)
+	_busy = true
+	_walk(5.0)
+	_busy = false
+	var to := nodes.size() - 1
+	_in_section = false
+	# 足場：下の屋上から立つ支柱2本と、掴める横棒（色なし）。その下に腰の高さの手すりと足場板（見た目だけ）
+	var bar_a := xf * Vector3(-POST_X + 0.15, BAR_H, -BAR_Z)
+	var bar_b := xf * Vector3(POST_X - 0.15, BAR_H, -BAR_Z)
+	geo.add_beam(bar_a, bar_b, 0.05, Mat.METAL, NC, 10)
+	grab_lines.append(GrabLines.bar(bar_a, bar_b))
+	for sx: float in [-1.0, 1.0]:
+		for dz: float in [0.0, 1.8]:
+			var foot := xf * Vector3(sx * POST_X, -DROP, -BAR_Z - dz)
+			var top := xf * Vector3(sx * POST_X, BAR_H + 0.5, -BAR_Z - dz)
+			geo.add_beam(foot, top, 0.045, Mat.METAL, 0, 8)
+		geo.add_beam(xf * Vector3(sx * POST_X, -DROP + 1.0, -BAR_Z), xf * Vector3(sx * POST_X, -DROP + 1.0, -BAR_Z - 1.8), 0.03, Mat.METAL, NC, 6)
+		geo.add_beam(xf * Vector3(sx * POST_X, -DROP + 0.2, -BAR_Z), xf * Vector3(sx * POST_X, BAR_H - 0.3, -BAR_Z - 1.8), 0.025, Mat.METAL, NC, 5)
+		geo.add_beam(xf * Vector3(sx * POST_X, BAR_H, -BAR_Z), xf * Vector3(sx * POST_X, BAR_H, -BAR_Z - 1.8), 0.04, Mat.METAL, NC, 6)
+		CourseProps.box(geo, xf, Vector3(sx * (POST_X + 0.45), -DROP + 2.0, -BAR_Z - 0.9), Vector3(0.9, 0.05, 2.2), Mat.HAZARD, NC)
+		for k: int in 3:
+			CourseProps.box(geo, xf, Vector3(sx * (POST_X - 0.06), BAR_H, -BAR_Z + 0.0 - 0.6 * k), Vector3(0.14, 0.14, 0.1), Mat.DARK, NC)
+	geo.add_beam(xf * Vector3(-POST_X, BAR_H + 0.5, -BAR_Z - 1.8), xf * Vector3(POST_X, BAR_H + 0.5, -BAR_Z - 1.8), 0.04, Mat.METAL, NC, 6)
+	var land := xf * Vector3(0, 0, -(g + 2.0))
+	var sc: Array[Dictionary] = [
+		_bn(edge, Act.JUMP, 0.03, 0.25),
+		_bn(xf * Vector3(0, 0, -BAR_Z), Act.SWING),
+		_bn(land),
+	]
+	_shortcut("swing", from, to, sc, Transform3D(xf.basis, xf * Vector3(0, BAR_H - 0.8, -BAR_Z)), Vector3(5.0, 3.0, 4.0),
+			[Player.State.SWING], xf * Vector3(0, BAR_H, -BAR_Z))
+	_keep_clear(edge, land, 3.2)
+
+
+## ジップラインの近道。主ルート：角を曲がって横へずれ、谷に架かる橋（梁）を渡って一段下り、戻る（角4つ）。
+## 近道：角の先の塔屋によじ登り、屋上の端から跳んで電線（ジップライン）を掴み、谷を真っすぐ滑り降りる
+func _zip_jog(side: float) -> void:
+	const HOUSE_H := 2.2      # 塔屋の屋根の上面は +0.1（よじ登れる2.4 mより低く）
+	const HOUSE_Z := 6.0      # 塔屋の中心（角から）
+	const CABLE_H := 2.7      # 塔屋の屋根から線まで
+	const DROP := 3.0
+	const END_H := 3.3        # 終点の線の高さ（着く屋上から）
+	_in_section = true
+	var w := _floor_width
+	var from := nodes.size() - 1
+	var xf := frame()
+	var y0 := pos.y
+	_turn(side, HOUSE_Z + 3.5)
+	_walk(6.0)
+	_turn(-side)
+	_beam(18.0, 1.4)
+	_drop(DROP)
+	_turn(-side)
+	var back := absf((pos - xf.origin).dot(xf.basis * Vector3.RIGHT))
+	_walk(back)
+	var p4 := pos
+	_turn(side)
+	_busy = true
+	_walk(12.0)
+	_busy = false
+	var to := nodes.size() - 1
+	_in_section = false
+	# 塔屋（扉が角の方を向く）と、屋根の上の柱から谷の向こうへ張った線
+	var house_xf := xf * Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, -HOUSE_Z))
+	CourseProps.stair_house(geo, house_xf, 3.0, 3.0, HOUSE_H)
+	_scuffs(Transform3D(xf.basis, xf * Vector3(0, 0, -(HOUSE_Z - 1.5))), 4, 1.6, 1.4, true)
+	var top := HOUSE_H + 0.1
+	var a := xf * Vector3(0, top + CABLE_H, -(HOUSE_Z + 1.5))
+	var north := xf.basis * Vector3.FORWARD
+	var b := p4 + north * (w * 0.5 + 4.0) + Vector3.UP * END_H
+	_zip_cable(a, b, xf.basis * Vector3.RIGHT * side, y0, p4.y)
+	var sc: Array[Dictionary] = [
+		_bn(xf * Vector3(0, 0, -(HOUSE_Z - 1.5)), Act.JUMP, 0.12, 0.5),
+		_bn(xf * Vector3(0, top, -HOUSE_Z)),
+		_bn(xf * Vector3(0, top, -(HOUSE_Z + 1.4)), Act.JUMP, 0.03, 0.25),
+		_bn(b - Vector3.UP * END_H, Act.ZIP),
+	]
+	var mid := (a + b) * 0.5
+	_shortcut("zipline", from, to, sc, Transform3D(xf.basis, Vector3(mid.x, y0 + 0.5, mid.z)), Vector3(4.0, 9.0, 10.0),
+			[Player.State.ZIPLINE], a - north * 1.0)
+	_keep_clear(a, b, 2.5)
+
+
+## ウォールキックの近道。h m の高い壁（縦ウォールランだけでは縁に届かない）。
+## 主ルート：屋上の片側の張り出しに木箱が3段（ルートカラー）。横へ寄って1段ずつよじ登り、上で戻る（遅いが確実）。
+## 近道：正面の壁を縦ウォールランで駆け上がり、頂点で壁の方へ倒したままジャンプ（壁を蹴り上がる）→ 縁を掴む
+func _kick_wall(h: float) -> void:
+	const WALL_Z := 13.0
+	const STEPS := 3
+	const STEP_D := 2.4
+	const WING := 16.0    # この区間の屋上の幅（木箱の段は張り出しに置く）
+	_in_section = true
+	var side := 1.0 if rng.randf() < 0.5 else -1.0
+	var from := nodes.size() - 1
+	_close_floor()
+	var keep_width := width
+	width = WING
+	_open_floor()
+	var xf := frame()
+	var sx := side * 5.0
+	var rise := h / STEPS
+	# 木箱の段（主ルート）：k 段目の上面は rise × (k + 1)、奥の段ほど壁に近い
+	# 1段目の正面へまっすぐ入る（よじ登りは正対から±25°まで）
+	var first := WALL_Z - STEP_D * (STEPS - 1)
+	if first < 8.0:
+		push_error("kickwall: steps start too close to the section start")
+	_node(xf * Vector3(sx * 0.4, 0, -(first - 7.5)))
+	_node(xf * Vector3(sx, 0, -(first - 4.0)))
+	_keep_clear(xf * Vector3(0, 0, 0), xf * Vector3(sx, 0, -(first - 4.0)), 2.0)
+	_keep_clear(xf * Vector3(sx, 0, -(first - 4.0)), xf * Vector3(sx, 0, -WALL_Z), 2.0)
+	for k: int in STEPS:
+		var front := WALL_Z - STEP_D * (STEPS - 1 - k)   # この段の前面。段は壁の方へ STEP_D の奥行き（最後の段は壁そのもの）
+		var base := rise * k
+		_node(xf * Vector3(sx, base, -front), Act.JUMP, 0.12, 0.5)
+		if k < STEPS - 1:
+			var top := rise * (k + 1)
+			CourseProps.box(geo, xf, Vector3(sx, top * 0.5, -(front + STEP_D * 0.5)), Vector3(2.4, top, STEP_D), Mat.ROUTE)
+			_node(xf * Vector3(sx, top, -(front + STEP_D * 0.6)))
+	pos = xf * Vector3(0, 0, -WALL_Z)
+	_close_floor()
+	pos += Vector3.UP * h
+	_open_floor()
+	width = keep_width
+	var top_xf := frame()
+	CourseProps.box(geo, top_xf, Vector3(sx, -0.1, 0.06), Vector3(2.4, 0.2, 0.14), Mat.ROUTE, NC)
+	_node(top_xf * Vector3(sx, 0, -2.0))
+	_busy = true
+	_walk(7.0)
+	_busy = false
+	var to := nodes.size() - 1
+	_in_section = false
+	# 近道：正面（木箱と反対寄り）の壁を駆け上がって蹴り上がる。壁に靴跡
+	var kx := -side * 0.8
+	_scuffs(Transform3D(xf.basis, xf * Vector3(kx, 0, -WALL_Z)), 6, 1.0, 2.6, true)
+	var sc: Array[Dictionary] = [
+		_bn(xf * Vector3(kx, 0, -WALL_Z), Act.JUMP, 0.1, 0.5),
+		_bn(xf * Vector3(kx, 0, -WALL_Z), Act.CLIMB_KICK),
+		_bn(top_xf * Vector3(kx, 0, -2.5)),
+	]
+	_shortcut("wall_kick", from, to, sc, Transform3D(xf.basis, xf * Vector3(kx, h - 0.6, -(WALL_Z - 0.5))), Vector3(2.6, 1.6, 1.4),
+			[], xf * Vector3(kx, h * 0.5, -(WALL_Z - 0.2)))
+
+
+## ジップラインの線：両端に柱（線の横 lateral の向きへ2.6 mずらして立て、腕で吊る）。ground_a / ground_b = 柱を立てる床の高さ
+func _zip_cable(a: Vector3, b: Vector3, lateral: Vector3, ground_a: float, ground_b: float) -> void:
+	geo.add_beam(a, b, 0.035, Mat.DARK, NC | LevelGeometry.NO_SHADOW, 6)
+	grab_lines.append(GrabLines.zip(a, b))
+	# 線の目印の玉（電線の標識のように遠くから線があると分かる。ルートカラーではない）
+	var n := maxi(2, int(a.distance_to(b) / 7.0))
+	for i: int in range(1, n):
+		var p := a.lerp(b, float(i) / n) + Vector3.UP * 0.2
+		geo.add_cylinder(p, 0.2, 0.36, Mat.HAZARD, Vector3.ZERO, NC | LevelGeometry.NO_SHADOW, Color.WHITE, 10)
+	var along := Vector3(b.x - a.x, 0.0, b.z - a.z).normalized()
+	for end: Array in [[a, -along, ground_a], [b, along, ground_b]]:
+		var p: Vector3 = end[0]
+		var out: Vector3 = end[1]
+		var foot := p + out * 0.4 + lateral * 2.6
+		var post_top := Vector3(foot.x, p.y + 0.5, foot.z)
+		geo.add_beam(Vector3(foot.x, float(end[2]), foot.z), post_top, 0.09, Mat.DARK, 0, 8)
+		geo.add_beam(post_top - Vector3.UP * 0.3, p + out * 0.4 + Vector3.UP * 0.2, 0.05, Mat.DARK, NC, 6)
+		geo.add_beam(p, p + out * 0.4 + Vector3.UP * 0.2, 0.03, Mat.DARK, NC, 5)
 
 
 # --- 区間・チェックポイント ---------------------------------------------------------
@@ -551,6 +865,9 @@ func _decorate() -> void:
 				var facing := Transform3D(Basis(Vector3.UP, y_rot + (PI * 0.5 if side > 0.0 else -PI * 0.5)), p)
 				var along := Transform3D(b, p)
 				var kind: String = kinds[rng.randi() % kinds.size()]
+				if not _is_clear(p, room * 0.5 + 0.8):
+					f += 2.0  # 近道の通り道には置かない
+					continue
 				f += _prop(kind, facing, along, room, usable - f) + rng.randf_range(2.0, 5.0)
 
 

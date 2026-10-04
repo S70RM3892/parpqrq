@@ -19,12 +19,21 @@ func _enter_tree() -> void:
 
 
 func add_bar(a: Vector3, b: Vector3) -> void:
-	lines.append({"kind": Kind.BAR, "a": a, "b": b})
+	lines.append(bar(a, b))
 
 
 ## high → low に滑り降りる
 func add_zip(high: Vector3, low: Vector3) -> void:
-	lines.append({"kind": Kind.ZIP, "a": high, "b": low})
+	lines.append(zip(high, low))
+
+
+## 線のデータだけ作る（CourseBuilder が集めて、Course が GrabLines に渡す）
+static func bar(a: Vector3, b: Vector3) -> Dictionary:
+	return {"kind": Kind.BAR, "a": a, "b": b}
+
+
+static func zip(high: Vector3, low: Vector3) -> Dictionary:
+	return {"kind": Kind.ZIP, "a": high, "b": low}
 
 
 ## 足元 feet の真上あたりで手が届く線を探す。

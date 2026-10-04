@@ -123,6 +123,8 @@ var _move_clock0: float = 0.0
 var _kicks: int = 0
 var _kick_contact_clock: float = -INF
 var _last_kick_normal: Vector3 = Vector3.ZERO
+## 縦ウォールランから蹴り上がった：次によじ登る時は駆け込んだ速さで登りきる
+var _climb_carry: bool = false
 ## 掴んでいる棒・線（GrabLines の何番目か）と、離した直後に掴み直さない時間
 var _line_owner: GrabLines
 var _line_index: int = -1
@@ -435,10 +437,15 @@ func _wall_run(delta: float) -> void:
 		_land()
 
 
-## 縦のウォールラン：壁に正対して駆け上がる。届けば縁を掴む
+## 縦のウォールラン：壁に正対して駆け上がる。届けば縁を掴む。
+## 途中でジャンプ：壁の方へ倒していれば壁を蹴ってもう一伸び（駆け上がりの頂点で押すとPerfect）、
+## 倒していなければ壁を蹴って後ろへ
 func _wall_climb(delta: float) -> void:
 	if _since_jump_press <= params.move_buffer and state_time > 0.1:
-		_back_kick(wall_normal, wall_normal)  # 壁を蹴って後ろへ
+		if _desired_velocity().dot(-wall_normal) > 0.3 * params.run_speed:
+			_climb_kick(delta)
+		else:
+			_back_kick(wall_normal, wall_normal)  # 壁を蹴って後ろへ
 		return
 	var r := VaultProbe.ledge(self, -wall_normal, WALL_DETECT, 0.4, params.ledge_reach, 20.0, _capsule.radius, STAND_HEIGHT)
 	if r != null:
@@ -474,7 +481,7 @@ func _slide(delta: float) -> void:
 	if braking:
 		h = h.move_toward(Vector3.ZERO, params.brake_decel * 0.6 * delta)
 	elif want != Vector3.ZERO and h.length() > 0.1:
-		h = h.slerp(want.normalized() * h.length(), minf(1.0, 1.5 * delta))
+		h = _turn_toward(h, want, minf(1.0, 1.5 * delta))
 	h = h.limit_length(params.max_flow_speed)
 	velocity = Vector3(h.x, minf(velocity.y, 0.0), h.z)
 
@@ -508,7 +515,7 @@ func _roll(delta: float) -> void:
 	var spd := h.length()
 	var want := _desired_velocity()
 	if want != Vector3.ZERO and spd > 0.1:
-		h = h.slerp(want.normalized() * spd, minf(1.0, 2.0 * delta))
+		h = _turn_toward(h, want, minf(1.0, 2.0 * delta))
 	velocity = Vector3(h.x, minf(velocity.y, 0.0), h.z)
 	_move(delta, true)
 	var t := state_time / params.roll_duration
@@ -542,6 +549,8 @@ func _set_state(s: State) -> void:
 	if s != State.AIR:
 		_kicks = 0
 		_kick_contact_clock = -INF
+		if s != State.CLIMB:
+			_climb_carry = false
 
 
 ## 地上でジャンプを押した時の優先順：ヴォルト → クライム → 縦ウォールラン（どれも無理ならfalse）
@@ -662,8 +671,9 @@ func _start_climb(r: VaultProbe.Result) -> void:
 	move = r
 	move_progress = 0.0
 	move.start = global_position
-	# 縦ウォールランから登る時は、壁に押し付けている速さ（約1 m/s）ではなく駆け込んだ速さで登りきる
-	_move_speed_in = _wall_climb_speed_in if state == State.WALL_CLIMB else horizontal_speed()
+	# 縦ウォールランから登る時（蹴り上がった後も）は、壁に押し付けている速さ（約1 m/s）ではなく駆け込んだ速さで登りきる
+	_move_speed_in = _wall_climb_speed_in if state == State.WALL_CLIMB or _climb_carry else horizontal_speed()
+	_climb_carry = false
 	var k := clampf(_move_speed_in / params.run_speed, 0.0, 1.0)
 	_move_duration = params.climb_time * lerpf(1.0, params.climb_fast_mult, k)
 	# 前面との距離を測り直す（ぶら下がりや縦ウォールランから来た時は start が変わっている）
@@ -875,7 +885,8 @@ func _try_wall_kick(delta: float) -> bool:
 	var perfect := absf(_jump_press_clock - contact) <= params.perfect_window
 	var along := h - n * nd
 	var push := clampf(absf(nd), params.wall_kick_push_min, params.wall_kick_push_max)
-	if _desired_velocity().dot(-n) > 0.3 * params.run_speed:
+	var kick_up := _desired_velocity().dot(-n) > 0.3 * params.run_speed
+	if kick_up:
 		push = params.wall_kick_push_up  # 壁の方へ倒している：上へ伸びる
 	var out := _boost(along + n * push, params.perfect_speed_bonus if perfect else 0.0)
 	var up := params.wall_kick_up * pow(params.wall_kick_chain_mult, _kicks)
@@ -883,8 +894,10 @@ func _try_wall_kick(delta: float) -> bool:
 	velocity = Vector3(out.x, maxf(velocity.y, up), out.z)
 	wall_normal = n
 	_since_jump_press = INF
-	_wall_cooldown = WALL_COOLDOWN
-	_last_wall_normal = n
+	if not kick_up:
+		# 跳ね返った壁にすぐ張り付かない（蹴り上がった時はその壁の縁を掴みたいので止めない）
+		_wall_cooldown = WALL_COOLDOWN
+		_last_wall_normal = n
 	_last_kick_normal = n
 	_add_momentum(params.momentum_gain_small)
 	_leave_ground()
@@ -896,6 +909,26 @@ func _try_wall_kick(delta: float) -> bool:
 		_apply_perfect(&"wall_kick", false)
 	_move(delta, false, false)
 	return true
+
+
+## 縦ウォールランの途中で壁を蹴り上がる（ウォールキックの1回目として数える）。頂点（上向きの速さが0になる時）が理想
+func _climb_kick(delta: float) -> void:
+	var apex := _clock + maxf(velocity.y, 0.0) / params.gravity()
+	var perfect := absf(_jump_press_clock - apex) <= params.perfect_window
+	var n := wall_normal
+	velocity = Vector3(n.x * params.wall_kick_push_up, maxf(velocity.y, params.wall_kick_up), n.z * params.wall_kick_push_up)
+	_since_jump_press = INF
+	_last_kick_normal = n
+	_add_momentum(params.momentum_gain_small)
+	_leave_ground()
+	_kicks = 1
+	_climb_carry = true
+	_jumped = true
+	_jump_cut_done = true
+	wall_kicked.emit()
+	if perfect:
+		_apply_perfect(&"wall_kick", false)
+	_move(delta, false, false)
 
 
 ## 蹴れる壁：進む向き・その左右45°/90°・視線の向きに、胸の高さで体の表面から wall_kick_reach 以内
@@ -1347,9 +1380,20 @@ func _steer(h: Vector3, target: Vector3, control: float, delta: float) -> Vector
 		var new_spd := spd
 		if grounded:
 			new_spd = maxf(spd - params.overspeed_decay * (1.0 - 0.5 * momentum) * delta, params.run_speed)
-		var turned := h.normalized().slerp(target.normalized(), minf(1.0, 6.0 * control * delta))
+		var turned := _turn_toward(h.normalized(), target, minf(1.0, 6.0 * control * delta))
 		return _soft_cap(turned * new_spd, delta)
 	return h.move_toward(target, params.run_speed / params.accel_time * control * delta)
+
+
+## 水平の速度 h の向きを to の向きへ weight の割合だけ回す（長さは保つ）。
+## Vector3.slerp と同じ結果だが、ほぼ平行な時に回転軸の長さが1からずれてエラーになるのを避ける
+static func _turn_toward(h: Vector3, to: Vector3, weight: float) -> Vector3:
+	var a := Vector2(h.x, h.z)
+	var b := Vector2(to.x, to.z)
+	if a.length_squared() < 1e-8 or b.length_squared() < 1e-8:
+		return h
+	var r := a.rotated(a.angle_to(b) * weight)
+	return Vector3(r.x, h.y, r.y)
 
 
 ## 上限を超えていたら少しずつ上限まで戻す（勢いを失った瞬間に速度が飛ばないように）

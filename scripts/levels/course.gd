@@ -42,6 +42,10 @@ func _ready() -> void:
 		builder.build(CourseCatalog.recipe(course_id))
 	geo.build()
 	add_child(geo)
+	var grabs := GrabLines.new()
+	grabs.name = "GrabLines"
+	grabs.lines = builder.grab_lines
+	add_child(grabs)
 
 	var atmo := Atmosphere.new()
 	atmo.name = "Atmosphere"
