@@ -1,8 +1,16 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
 [ext_resource type="Resource" path="res://resources/movement_default.tres" id="2_params"]
 [ext_resource type="Script" path="res://scripts/player/camera_rig.gd" id="3_rig"]
+[ext_resource type="Script" path="res://scripts/player/body/arms.gd" id="4_arms"]
+[ext_resource type="Script" path="res://scripts/player/body/legs.gd" id="5_legs"]
+[ext_resource type="ArrayMesh" path="res://assets/body/hand_r.res" id="6_hand"]
+[ext_resource type="Material" path="res://assets/body/hand_material.tres" id="7_handmat"]
+[ext_resource type="ArrayMesh" path="res://assets/body/leg_thigh.res" id="8_thigh"]
+[ext_resource type="ArrayMesh" path="res://assets/body/leg_shin.res" id="9_shin"]
+[ext_resource type="ArrayMesh" path="res://assets/body/leg_foot.res" id="10_foot"]
+[ext_resource type="Material" path="res://assets/body/leg_material.tres" id="11_legmat"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.35
@@ -39,5 +47,63 @@ eye = NodePath("../EyeAnchor")
 [node name="Camera3D" type="Camera3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake"]
 current = true
 fov = 90.0
-near = 0.05
+near = 0.03
 far = 400.0
+
+[node name="Arms" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D" node_paths=PackedStringArray("rig")]
+script = ExtResource("4_arms")
+rig = NodePath("../../../../../../..")
+
+[node name="Right" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms"]
+
+[node name="Hand" type="MeshInstance3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms/Right"]
+cast_shadow = 0
+mesh = ExtResource("6_hand")
+surface_material_override/0 = ExtResource("7_handmat")
+
+[node name="Left" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms"]
+
+[node name="Hand" type="MeshInstance3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms/Left"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+cast_shadow = 0
+mesh = ExtResource("6_hand")
+surface_material_override/0 = ExtResource("7_handmat")
+
+[node name="Body" type="Node3D" parent="." node_paths=PackedStringArray("player")]
+top_level = true
+script = ExtResource("5_legs")
+player = NodePath("..")
+
+[node name="HipR" type="Node3D" parent="Body"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.11, 0, 0)
+
+[node name="Thigh" type="MeshInstance3D" parent="Body/HipR"]
+mesh = ExtResource("8_thigh")
+surface_material_override/0 = ExtResource("11_legmat")
+
+[node name="Shin" type="MeshInstance3D" parent="Body/HipR/Thigh"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.3467, -0.0251)
+mesh = ExtResource("9_shin")
+surface_material_override/0 = ExtResource("11_legmat")
+
+[node name="Foot" type="MeshInstance3D" parent="Body/HipR/Thigh/Shin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4507, 0.0553)
+mesh = ExtResource("10_foot")
+surface_material_override/0 = ExtResource("11_legmat")
+
+[node name="HipL" type="Node3D" parent="Body"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, 1, -0.11, 0, 0)
+
+[node name="Thigh" type="MeshInstance3D" parent="Body/HipL"]
+mesh = ExtResource("8_thigh")
+surface_material_override/0 = ExtResource("11_legmat")
+
+[node name="Shin" type="MeshInstance3D" parent="Body/HipL/Thigh"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.3467, -0.0251)
+mesh = ExtResource("9_shin")
+surface_material_override/0 = ExtResource("11_legmat")
+
+[node name="Foot" type="MeshInstance3D" parent="Body/HipL/Thigh/Shin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4507, 0.0553)
+mesh = ExtResource("10_foot")
+surface_material_override/0 = ExtResource("11_legmat")

@@ -12,15 +12,20 @@
 - レンダラーは Mobile。SSR・SSAO・ボリュメトリックフォグ・SDFGI・VoxelGI は使えない前提で書く。
 
 ## 構成
-- `scripts/player/player.gd` — 移動。速度計算は自前、`move_and_slide()` は衝突処理だけ
+- `scripts/player/player.gd` — 状態機械（GROUND / AIR / VAULT / ROLL / HARD_LAND）。速度計算は自前、`move_and_slide()` は衝突処理だけ
+- `scripts/player/vault_probe.gd` — 前方の障害物がヴォルトできるかの判定
 - `scripts/player/camera_rig.gd` — top_level のカメラリグ。演出は Bob/Dip/Tilt/Shake 層ごとに分ける
+- `scripts/player/body/arms.gd`, `legs.gd` — 1人称の手と脚（骨格なしの剛体パーツを手続き的に動かす）
 - `scripts/player/movement_params.gd` + `resources/movement_default.tres` — 動きの数値は全部ここ
-- `scripts/autoload/settings.gd` — プレイヤー設定（FOV・感度・演出の強さ）
+- `scripts/autoload/settings.gd` — プレイヤー設定（FOV・感度・演出の強さ・手触り4層のON/OFF）
+- `scripts/autoload/haptics.gd` — コントローラー振動
 - `scenes/ui/debug_overlay.tscn` — FPS・フレーム時間・ゲート判定（F3 / Back）
-- `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義）
+- `scenes/ui/tuning_panel.tscn` — 数値の調整パネル（F1 / R3）
+- `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義）、`course_timer.gd` — 計測
+- `tools/build_body.gd` — `assets/source/*.glb` から体のメッシュを作り直す（`godot --headless --path . -s tools/build_body.gd`）
 
 ## 作業ルール
 - 変更のたびに Godot MCP（`.mcp.json`）で実行し、出力のエラーを読んで自分で直す。
-- コミット前にスモークテストを通す: `godot --headless --path . res://tests/smoke_test.tscn`（終了コード0で合格）
+- コミット前にスモークテストを通す: `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`（終了コード0で合格）。コースを自動で走り、全技が仕様どおり出るかを見る
 - 手触りの数値（ジャンプの高さ、カメラ演出の強さなど `MovementParams` と演出の値）は勝手に変えない。持ち主が走りながら決める。
 - 入力は InputMap のアクション名で扱う（キー・ボタンを直接読まない）。

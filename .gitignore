@@ -6,3 +6,4 @@ build/
 *.aab
 *.tmp
 export_credentials.cfg
+/_capture/

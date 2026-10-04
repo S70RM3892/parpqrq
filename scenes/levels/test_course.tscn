@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/levels/greybox.gd" id="1_grey"]
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="2_player"]
+[ext_resource type="Script" path="res://scripts/levels/course_timer.gd" id="3_timer"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
 sky_top_color = Color(0.45, 0.65, 0.92, 1)
@@ -23,6 +24,12 @@ fog_density = 0.4
 fog_depth_begin = 30.0
 fog_depth_end = 160.0
 
+[sub_resource type="BoxShape3D" id="Box_start"]
+size = Vector3(6, 4, 8)
+
+[sub_resource type="BoxShape3D" id="Box_goal"]
+size = Vector3(10, 6, 6)
+
 [node name="TestCourse" type="Node3D"]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
@@ -36,6 +43,37 @@ directional_shadow_max_distance = 40.0
 
 [node name="Greybox" type="Node3D" parent="."]
 script = ExtResource("1_grey")
+
+[node name="CourseTimer" type="Node3D" parent="."]
+script = ExtResource("3_timer")
+
+[node name="StartArea" type="Area3D" parent="CourseTimer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 8)
+
+[node name="Shape" type="CollisionShape3D" parent="CourseTimer/StartArea"]
+shape = SubResource("Box_start")
+
+[node name="GoalArea" type="Area3D" parent="CourseTimer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -73)
+
+[node name="Shape" type="CollisionShape3D" parent="CourseTimer/GoalArea"]
+shape = SubResource("Box_goal")
+
+[node name="HUD" type="CanvasLayer" parent="CourseTimer"]
+
+[node name="Time" type="Label" parent="CourseTimer/HUD"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -300.0
+offset_top = 40.0
+offset_right = 300.0
+offset_bottom = 160.0
+grow_horizontal = 2
+horizontal_alignment = 1
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 48
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 8)

@@ -21,6 +21,12 @@ var speed_lines_strength: float = 1.0
 var center_dot: bool = false
 var hitstop_slowmo: bool = true
 
+# 手触りの4層（仕様書 4章）。どれが気持ちよさに効き、どれが酔いの原因かを切り分ける
+var feel_camera: bool = true          ## ボブ・着地ディップ・傾き・速度FOV
+var feel_body: bool = true            ## 手と脚の表示
+var feel_impact: bool = true          ## 画面揺れ
+var feel_vibration: bool = true       ## コントローラー振動
+
 # 性能
 var max_fps: int = 60                 ## 60 / 90 / 120
 var render_scale: float = 1.0         ## 0.7〜1.0
@@ -29,6 +35,7 @@ const _KEYS: PackedStringArray = [
 	"fov", "sensitivity_x", "sensitivity_y", "invert_y",
 	"speed_fov_strength", "head_bob_strength", "screen_shake_strength",
 	"camera_tilt_strength", "speed_lines_strength", "center_dot", "hitstop_slowmo",
+	"feel_camera", "feel_body", "feel_impact", "feel_vibration",
 	"max_fps", "render_scale",
 ]
 

@@ -63,6 +63,85 @@ func _run() -> void:
 	Input.action_release(&"retry")
 	_check_near("retry returns to spawn", p.global_position.distance_to(Vector3(0, 0, 8)), 0.0, 0.05)
 
+	await _course_run(p)
+
+
+## コースを自動で走る。前進は押しっぱなし、決まった位置でジャンプ・しゃがみを押す
+func _course_run(p: Player) -> void:
+	var mp := p.params
+	p.respawn()
+	await _frames(10)
+	# z がこの値を下回ったらジャンプ（障害物の前面 + 届く距離の手前）
+	var jump_at: Array[float] = [1.9, -6.1, -34.3, -44.1]
+	var labels: Array[String] = ["vault 1.0 m", "vault 0.8 m", "vault onto 1.0 m box", "vault 1.2 m"]
+	var vaulted: Array[bool] = [false, false, false, false]
+	var speed_after: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var next_jump := 0
+	var was_vault := false
+	var max_y_stairs1 := 0.0
+	var max_y_stairs2 := 0.0
+	var rolled := false
+	var roll_pressed := false
+	var roll_end_speed := 0.0
+	var was_roll := false
+	var hard := false
+	var y_on_box := 0.0
+	var crashed := 0
+	p.crashed.connect(func(_s: float) -> void: crashed += 1)
+	var label := get_tree().root.find_child("Time", true, false) as Label
+	Input.action_press(&"move_forward")
+	for i: int in 60 * 25:
+		await get_tree().physics_frame
+		var z := p.global_position.z
+		var y := p.global_position.y
+		if OS.get_environment("SMOKE_TRACE") != "" and z < -31.0 and z > -38.0:
+			print("  z=%.2f y=%.2f st=%d spd=%.2f vy=%.2f" % [z, y, p.state, p.horizontal_speed(), p.velocity.y])
+		if next_jump < jump_at.size() and z < jump_at[next_jump]:
+			Input.action_press(&"jump")
+			await get_tree().physics_frame
+			Input.action_release(&"jump")
+			next_jump += 1
+		if p.state == Player.State.VAULT:
+			vaulted[next_jump - 1] = true
+		elif was_vault:
+			speed_after[next_jump - 1] = p.horizontal_speed()
+			if next_jump == 3:
+				y_on_box = y
+		was_vault = p.state == Player.State.VAULT
+		if z > -30.0 and z < -18.0:
+			max_y_stairs1 = maxf(max_y_stairs1, y)
+		if z < -50.0 and z > -64.0:
+			max_y_stairs2 = maxf(max_y_stairs2, y)
+		# 2.4 m の台から落ちて着地直前にしゃがむ → ローリング
+		if z < -30.0 and z > -35.0 and not roll_pressed and p.state == Player.State.AIR and p.velocity.y < 0.0 and y < 0.5:
+			Input.action_press(&"crouch")
+			await get_tree().physics_frame
+			Input.action_release(&"crouch")
+			roll_pressed = true
+		if p.state == Player.State.ROLL:
+			rolled = true
+		elif was_roll:
+			roll_end_speed = p.horizontal_speed()
+		was_roll = p.state == Player.State.ROLL
+		if p.state == Player.State.HARD_LAND:
+			hard = true
+		if label != null and label.text != "":
+			break
+	Input.action_release(&"move_forward")
+	var keep := mp.run_speed * mp.vault_speed_keep
+	for k: int in labels.size():
+		_check_true("%s: vaulted" % labels[k], vaulted[k])
+		if k != 2:
+			_check_near("%s: speed kept" % labels[k], speed_after[k], keep, keep * 0.06)
+	_check_near("vault onto: standing on box top", y_on_box, 1.0, 0.05)
+	_check_true("step 0.45 m and stairs climbed to 2.4 m (got %.2f)" % max_y_stairs1, max_y_stairs1 > 2.35)
+	_check_true("rolled after 2.4 m drop", rolled)
+	_check_near("roll keeps speed", roll_end_speed, mp.run_speed, mp.run_speed * 0.08)
+	_check_true("stairs climbed to 4.8 m (got %.2f)" % max_y_stairs2, max_y_stairs2 > 4.75)
+	_check_true("hard landing after 4.8 m drop without roll", hard)
+	_check_true("no wall crash on the clean line (got %d)" % crashed, crashed == 0)
+	_check_true("reached goal, timer shown: %s" % (label.text.replace("\n", " ") if label != null else "-"), label != null and label.text != "")
+
 
 func _check_near(label: String, got: float, want: float, abs_tol: float = -1.0) -> void:
 	var tol := abs_tol if abs_tol >= 0.0 else maxf(absf(want) * TOL, 0.05)
