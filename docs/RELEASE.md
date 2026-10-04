@@ -1,0 +1,33 @@
+# リリース手順（Android APK）
+
+## 0.1.0-beta（M1 手触り検証版）
+
+- パッケージ: `com.parpqrq.parkour` / versionCode 1 / versionName `0.1.0-beta`
+- arm64-v8a のみ、Vulkan必須、Godot 4.7.2 / Mobileレンダラー
+- 署名証明書 SHA-256: `5cfc9a363f5b3814899bd53bd4f048964bcd5521e1d2953056bd43a19e7ec3d7`
+- 中身: M1（走り・ジャンプ・ヴォルト・ローリング・ハードランディング、手触り4層、調整パネル、計測コース）
+
+## 署名鍵
+
+`parkour-release.keystore`（alias `parkour`）は**リポジトリに入れない**。持ち主が保管する。
+鍵を失くすと、同じアプリとして更新できなくなる（入れ直しが必要になる）。
+
+## ビルド
+
+1. エディタの「エクスポートテンプレートの管理」で 4.7.2 のテンプレートを入れる。エディタ設定で Android SDK と Java SDK のパスを指定する（docs/M0.md）。
+2. `export_presets.cfg` の `version/code` を1つ上げ、`version/name` を更新する。
+3. 鍵を環境変数で渡して書き出す（パスワードをファイルに残さない）:
+
+```sh
+export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/path/to/parkour-release.keystore
+export GODOT_ANDROID_KEYSTORE_RELEASE_USER=parkour
+export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=...
+godot --headless --path . --export-release "Android" build/android/parkour-<version>.apk
+```
+
+4. 確認: `apksigner verify --print-certs build/android/parkour-<version>.apk` の SHA-256 が上と一致すること。
+5. 書き出す前にスモークテストを通す: `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`
+
+## インストール
+
+端末で「提供元不明のアプリ」を許可してAPKを開く。またはPCから `adb install -r parkour-<version>.apk`。
