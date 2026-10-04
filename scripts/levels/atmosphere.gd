@@ -154,11 +154,15 @@ func apply_preset(p: Dictionary) -> void:
 	e.tonemap_exposure = p.exposure
 	e.adjustment_contrast = p.contrast
 	e.adjustment_saturation = p.saturation
-	e.glow_intensity = 0.55
-	e.glow_strength = 0.9
-	e.glow_bloom = 0.0
-	e.glow_hdr_threshold = 0.95
-	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	# 光るもの（太陽・看板・ネオン・窓）だけが柔らかく滲む。広い段まで使って太陽のまわりに大きな光の輪
+	e.glow_intensity = 0.7
+	e.glow_strength = 1.0
+	e.glow_bloom = 0.02
+	e.glow_hdr_threshold = 1.1
+	e.glow_hdr_scale = 2.0
+	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
+	for lv: int in 7:
+		e.set_glow_level(lv, [0.0, 1.0, 0.8, 0.6, 0.5, 0.35, 0.0][lv])
 	var cm := _clouds.material_override as ShaderMaterial
 	cm.set_shader_parameter(&"cloud_color", p.cloud)
 	cm.set_shader_parameter(&"shade_color", p.cloud_shade)

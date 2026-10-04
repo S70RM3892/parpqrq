@@ -56,6 +56,7 @@ func _ready() -> void:
 	lightmap_ok = LevelLighting.apply(geo, course_id)
 	if bool(area.get("lit", false)):
 		_spawn_lights(geo.lights, LevelStyle.night_amount_for(area.time))
+	_spawn_reflection_probes(geo.glass_spots)
 	var grabs := GrabLines.new()
 	grabs.name = "GrabLines"
 	grabs.lines = builder.grab_lines
@@ -148,6 +149,38 @@ func _spawn_lights(list: Array[Dictionary], night_k: float) -> void:
 		light.distance_fade_begin = 70.0
 		light.distance_fade_length = 20.0
 		add_child(light)
+
+
+## ガラスの床・天窓の上に反射プローブ（一度だけ撮る）。ガラスに周りのビルや手すりが映る。
+## 近いものはまとめ、MAX_PROBES までにする（読み込みの時に撮るので数を抑える）
+const MAX_PROBES := 6
+const PROBE_MERGE := 35.0
+
+
+func _spawn_reflection_probes(spots: PackedVector3Array) -> void:
+	var placed: Array[Vector3] = []
+	for p: Vector3 in spots:
+		var near := false
+		for q: Vector3 in placed:
+			if q.distance_to(p) < PROBE_MERGE:
+				near = true
+				break
+		if near:
+			continue
+		placed.append(p)
+		if placed.size() >= MAX_PROBES:
+			break
+	for p: Vector3 in placed:
+		var probe := ReflectionProbe.new()
+		probe.update_mode = ReflectionProbe.UPDATE_ONCE
+		probe.size = Vector3(PROBE_MERGE + 10.0, 24.0, PROBE_MERGE + 10.0)
+		probe.origin_offset = Vector3(0, -8.0, 0)
+		probe.position = p + Vector3.UP * 8.0
+		probe.box_projection = true
+		probe.interior = false
+		probe.max_distance = 120.0
+		probe.mesh_lod_threshold = 4.0
+		add_child(probe)
 
 
 ## 開発者のゴースト（assets/ghosts/<id>.res）。形が記録した時と違えば使わない

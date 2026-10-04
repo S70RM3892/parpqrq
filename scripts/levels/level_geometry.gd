@@ -82,6 +82,8 @@ var keep_bake_data: bool = false
 ## 灯り（街灯・ネオン・看板）。Course が夕方・夜に OmniLight3D / SpotLight3D にする。
 ## {pos: Vector3, color: Color, energy: float, range: float, down: bool（true = 真下へのスポット）}
 var lights: Array[Dictionary] = []
+## 広いガラスの床・天窓の中心（Course が反射プローブを置く：映り込みが空だけにならないように）
+var glass_spots: PackedVector3Array = []
 
 
 func _init() -> void:
@@ -338,6 +340,8 @@ func _box_mesh(xf: Transform3D, size: Vector3, mat: int, flags: int, tint: Color
 	var rnd := _rng.randf()
 	var bake := _bakes(mat, flags)
 	var d_top := LM_DENSITY if bake else 0.0
+	if mat == Mat.GLASS and size.x * size.z > 12.0:
+		glass_spots.append(xf * Vector3(0, e.y, 0))
 	# 箱が重なった所で同じ平面の面がちらつかない（Zファイティング）ように、箱ごとに見た目だけ少しずらす：
 	# 側面は数mm内側へ、上面は数mm下へ（当たり判定はそのまま。上面は大きさを保つので床に隙間はできない）
 	var top_y := e.y - fposmod(rnd * 3.7, 1.0) * 0.004
