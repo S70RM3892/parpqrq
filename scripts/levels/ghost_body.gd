@@ -125,7 +125,12 @@ func _pose(spd: float) -> void:
 			a[&"shin_l"] = 2.0
 			a[&"arm_r"] = 1.0
 			a[&"arm_l"] = 1.0
-		Player.State.LEDGE_HANG:
+		Player.State.LEDGE_HANG, Player.State.SWING, Player.State.ZIPLINE:
+			if _state != Player.State.LEDGE_HANG:
+				a[&"thigh_r"] = 0.8
+				a[&"thigh_l"] = 0.5
+				a[&"shin_r"] = 1.0
+				a[&"shin_l"] = 1.2
 			a[&"arm_r"] = 2.9
 			a[&"arm_l"] = 2.9
 			a[&"fore_r"] = 0.0

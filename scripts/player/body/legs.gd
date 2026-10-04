@@ -87,6 +87,13 @@ func _pose(key: StringName, leg_phase: float) -> Vector3:
 			return Vector3(75.0, 8.0, 15.0) if right else Vector3(30.0, 115.0, 35.0)
 		Player.State.ROLL:
 			return Vector3(100.0, 140.0, 30.0)
+		Player.State.SWING:
+			# 前へ振る時は脚を前へ投げ出し、後ろへ振る時は畳む（下を見ると足が振れる）
+			var k := clampf(p.swing_angle / deg_to_rad(90.0), -1.0, 1.0)
+			var hip_s := 20.0 + 45.0 * k
+			return Vector3(hip_s, 30.0 - 20.0 * k, 10.0) if right else Vector3(hip_s - 10.0, 40.0 - 20.0 * k, 15.0)
+		Player.State.ZIPLINE:
+			return Vector3(55.0, 70.0, 20.0) if right else Vector3(40.0, 90.0, 25.0)
 		Player.State.HARD_LAND:
 			var t := p.state_time / prm.hard_land_stun
 			var k := 1.0 - smoothstep(0.55, 1.0, t)

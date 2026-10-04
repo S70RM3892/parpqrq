@@ -12,6 +12,7 @@ class Result:
 	var dir: Vector3         ## 越える向き（水平・単位）
 	var front_dist: float    ## start→前面（dir方向）
 	var back_dist: float     ## start→背面。乗るだけなら上面の着地点まで
+	var back_face: float     ## start→障害物の奥の面（手で押し切る所。ヴォルトジャンプのPerfectの基準）
 	var top_y: float
 	var onto: bool           ## true = 上に乗る（深い障害物）
 	var land_on_ground: bool ## 着地点の下に床があるか
@@ -68,6 +69,7 @@ static func probe(body: CharacterBody3D, move_dir: Vector3, speed: float, p: Mov
 		# 深い：上に乗る
 		r.onto = true
 		r.back_dist = r.front_dist + radius + 0.35
+		r.back_face = r.back_dist
 		r.land = feet + dir * r.back_dist
 		r.land.y = top_y
 		r.land_on_ground = true
@@ -75,6 +77,7 @@ static func probe(body: CharacterBody3D, move_dir: Vector3, speed: float, p: Mov
 	else:
 		var back_dist: float = (back_hit.position - feet).dot(dir)
 		var after := radius + clampf(speed * 0.1, 0.4, 1.2)
+		r.back_face = back_dist
 		r.back_dist = back_dist + after
 		r.land = feet + dir * r.back_dist
 		mid = feet + dir * (r.front_dist + back_dist) * 0.5
@@ -131,6 +134,7 @@ static func ledge(body: CharacterBody3D, move_dir: Vector3, reach: float, lo: fl
 	r.land_on_ground = true
 	r.front_dist = (front - feet).dot(dir)
 	r.back_dist = r.front_dist + radius + 0.3
+	r.back_face = r.back_dist
 	r.land = feet + dir * r.back_dist
 	r.land.y = top_y
 	if _blocked(space, r.land + Vector3.UP * 0.05, radius, height, excl):
@@ -158,6 +162,34 @@ static func front_wall(body: CharacterBody3D, dir: Vector3, dist: float, height:
 	if hit.is_empty() or absf((hit.normal as Vector3).y) > 0.3:
 		return {}
 	return hit
+
+
+## 体の周りで一番近い壁（ウォールキック）。dirs の向きへ胸の高さから探す。
+## {normal: 水平の単位ベクトル, dist: 体の中心から壁面までの垂直距離}、無ければ空
+static func nearest_wall(body: CharacterBody3D, dirs: Array[Vector3], dist: float, height: float = 1.0) -> Dictionary:
+	var space := body.get_world_3d().direct_space_state
+	var from := body.global_position + Vector3.UP * height
+	var excl: Array[RID] = [body.get_rid()]
+	var best := {}
+	var best_d := INF
+	for d: Vector3 in dirs:
+		var hit := _ray(space, from, from + d * dist, excl)
+		if hit.is_empty() or absf((hit.normal as Vector3).y) > 0.3:
+			continue
+		var n: Vector3 = hit.normal
+		n = Vector3(n.x, 0.0, n.z).normalized()
+		var perp := (from - (hit.position as Vector3)).dot(n)
+		if perp < best_d:
+			best_d = perp
+			best = {"normal": n, "dist": perp}
+	return best
+
+
+## 足元から depth 以内に床があるか（着地の直前）
+static func floor_below(body: CharacterBody3D, depth: float) -> bool:
+	var from := body.global_position + Vector3.UP * 0.1
+	var hit := _ray(body.get_world_3d().direct_space_state, from, from + Vector3.DOWN * (depth + 0.1), [body.get_rid()] as Array[RID])
+	return not hit.is_empty() and (hit.normal as Vector3).y > 0.7
 
 
 ## 立てるか（スライド後に起き上がれるか）

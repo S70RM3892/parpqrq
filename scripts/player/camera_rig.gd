@@ -28,6 +28,8 @@ const SLIDE_PITCH_DEG := 5.0        ## 後傾
 const WALLRUN_ROLL_DEG := 10.0      ## 壁と反対側へ
 const BRAKE_EYE_DROP := 0.12        ## m
 const BRAKE_PITCH_DEG := 4.0        ## のけぞり
+const SWING_PITCH_K := 0.3          ## スイングの振れ角に対する目線の上下（前へ振り上がると見上げる）
+const ZIP_PITCH_DEG := 4.0          ## ジップラインで線の先を見下ろす
 const SHAKE_DECAY := 1.5            ## トラウマ/秒
 const SHAKE_ROT_DEG := Vector3(2.0, 2.0, 3.0)
 const SHAKE_POS := 0.03
@@ -234,6 +236,10 @@ func _update_camera_layer(delta: float) -> void:
 		Player.State.SLIDE:
 			drop_target = SLIDE_EYE_DROP
 			pitch_target = SLIDE_PITCH_DEG
+		Player.State.SWING:
+			pitch_target = rad_to_deg(p.swing_angle) * SWING_PITCH_K
+		Player.State.ZIPLINE:
+			pitch_target = -ZIP_PITCH_DEG
 		Player.State.GROUND:
 			if p.braking:
 				# 足を前に突っ張って止まる：少し沈んでのけぞる

@@ -62,6 +62,40 @@ extends Resource
 @export_range(0.0, 0.3, 0.01) var slide_jump_bonus: float = 0.08
 @export_range(0.6, 1.4, 0.05) var slide_height: float = 1.0      ## m。スライド中の当たり判定の高さ
 
+@export_group("ウォールキック")
+## 空中で壁に触れた瞬間にジャンプ：上へ伸び、壁から離れる向きへ跳ね返る（tic-tac）。横ウォールランにならない角度・速さの壁で出る
+@export_range(0.0, 10.0, 0.1) var wall_kick_up: float = 5.5          ## m/s。蹴った後の上向き速度（普通のジャンプは6.7）
+@export_range(0.0, 8.0, 0.1) var wall_kick_push_min: float = 3.0     ## m/s。壁から離れる速さ（最低）
+@export_range(0.0, 12.0, 0.1) var wall_kick_push_max: float = 6.0    ## m/s。壁へ向かっていた速さをここまで跳ね返す
+@export_range(0.0, 4.0, 0.1) var wall_kick_push_up: float = 1.0      ## m/s。壁の方へ倒したまま蹴ると上へ伸びる（離れる速さはこれだけ）
+@export_range(0.05, 0.8, 0.01) var wall_kick_reach: float = 0.3      ## m。体の表面から壁までこの距離なら蹴れる
+@export_range(1, 6, 1) var wall_kick_max: int = 3                    ## 1回の空中で蹴れる回数（同じ壁を続けては蹴れない）
+@export_range(0.3, 1.0, 0.05) var wall_kick_chain_mult: float = 0.85 ## 2回目以降の上向き速度の倍率
+
+@export_group("ヴォルトジャンプ")
+## ヴォルトで障害物の上にいる間にジャンプを押し直すと、上から跳ぶ（キャッシュ／ダイブコング）
+@export_range(0.0, 0.3, 0.01) var vault_jump_bonus: float = 0.05     ## 速度の上乗せ
+@export_range(0.5, 1.5, 0.05) var vault_jump_lift: float = 1.0       ## 跳ぶ高さ（普通のジャンプ比）
+
+@export_group("スイングバー")
+## 空中で横棒に手が届くと掴んで振り子になる。ジャンプで離す（振り上がる途中が遠くへ、頂上近くが高く飛ぶ）
+@export_range(0.6, 1.8, 0.05) var swing_radius: float = 1.1          ## m。バーから体の重心まで
+@export_range(0.2, 1.2, 0.05) var swing_reach: float = 0.6           ## m。体の前後この範囲のバーを掴む
+@export_range(60.0, 170.0, 5.0) var swing_max_angle: float = 105.0   ## 度。振れ幅の上限
+@export_range(5.0, 80.0, 1.0) var swing_ideal_angle: float = 35.0    ## 度。振り上がってこの角度で離すとPerfect
+@export_range(0.0, 0.5, 0.01) var swing_release_bonus: float = 0.05  ## 離した時の速度の上乗せ
+@export_range(0.0, 6.0, 0.1) var swing_release_lift: float = 1.5     ## m/s。離す時に足す上向き
+@export_range(0.0, 2.0, 0.05) var swing_damping: float = 0.3         ## /s。こがないと振れ幅が減る
+@export_range(0.0, 15.0, 0.5) var swing_pump: float = 4.0            ## rad/s²。振れる向きに倒すとこげる
+
+@export_group("ジップライン")
+## 空中で斜めの線に手が届くと掴んで滑り降りる。ジャンプで離す。終点の少し手前で離すとPerfect
+@export_range(0.2, 1.2, 0.05) var zip_reach: float = 0.6             ## m。体の軸から線までの横の距離
+@export_range(5.0, 25.0, 0.5) var zip_max_speed: float = 15.0        ## m/s
+@export_range(0.0, 5.0, 0.1) var zip_friction: float = 0.5           ## m/s²
+@export_range(0.0, 8.0, 0.1) var zip_release_up: float = 3.5         ## m/s。ジャンプで離した時の上向き
+@export_range(0.0, 0.5, 0.01) var zip_ideal_time: float = 0.15       ## s。終点のこの時間前に離すとPerfect
+
 @export_group("着地")
 @export_range(0.5, 4.0, 0.1) var roll_min_drop: float = 2.0     ## m。これ以上の落下でローリング可
 @export_range(0.0, 0.4, 0.01) var roll_window_before: float = 0.2

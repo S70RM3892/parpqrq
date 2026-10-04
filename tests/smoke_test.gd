@@ -72,6 +72,12 @@ func _run() -> void:
 	await _wall_jump_test(p)
 	await _ledge_test(p)
 	await _slide_slope_test(p)
+	# 1.1 の技
+	await _wall_kick_test(p)
+	await _vault_jump_test(p)
+	await _ledge_back_kick_test(p)
+	await _swing_test(p)
+	await _zip_test(p)
 
 
 ## 即リトライ（仕様書 5章）：押して離せば0.5秒以内にスタートへ、0.3秒押し続ければチェックポイントへ。落下でもチェックポイントへ
@@ -248,6 +254,206 @@ func _slide_slope_test(p: Player) -> void:
 	_check_true("slide slope: still sliding after 1.0 s (state %d)" % p.state, p.state == Player.State.SLIDE)
 	_check_true("slide slope: accelerating (%.2f -> %.2f m/s)" % [v0, p.horizontal_speed()], p.horizontal_speed() > v0 + 0.5)
 	Input.action_release(&"move_forward")
+
+
+## ウォールキック：壁に触れた瞬間に押すと跳ね返って上へ（Perfect）、同じ壁は続けて蹴れない。
+## 壁の方へ倒したまま蹴ると上へ伸び、落ちながらでは届かない縁を掴める
+func _wall_kick_test(p: Player) -> void:
+	var mp := p.params
+	var c := {"kicks": 0, "perfect": 0}
+	var on_kick := func() -> void: c.kicks += 1
+	var on_perfect := func(k: StringName) -> void:
+		if k == &"wall_kick":
+			c.perfect += 1
+	p.wall_kicked.connect(on_kick)
+	p.perfect.connect(on_perfect)
+	# 遅め（横ウォールラン・縦ウォールランの速さに届かない）に斜めから壁（面 x=20.5）へ
+	await _place(p, Vector3(19.4, 1.5, -45.0), Vector3(4.0, 0.0, -3.0))
+	var pressed := false
+	for i: int in 40:
+		await get_tree().physics_frame
+		if not pressed and 20.5 - p.global_position.x - 0.35 <= 0.06:
+			pressed = true
+			await _tap(&"jump")
+		if c.kicks > 0:
+			break
+	_check_true("wall kick: kicked at contact (%d)" % c.kicks, c.kicks == 1)
+	_check_true("wall kick: perfect at contact (%d)" % c.perfect, c.perfect == 1)
+	_check_true("wall kick: bounced off the wall (vx %.2f)" % p.velocity.x, p.velocity.x < -mp.wall_kick_push_min)
+	_check_true("wall kick: going up (vy %.2f)" % p.velocity.y, p.velocity.y > mp.wall_kick_up * 0.9)
+	await _tap(&"jump")
+	await _frames(2)
+	_check_true("wall kick: same wall cannot be kicked twice in a row (%d)" % c.kicks, c.kicks == 1)
+	await _frames(40)
+
+	# 3.0 m の箱の前で落ちている：そのままでは縁に届かない
+	Input.action_press(&"move_forward")
+	await _place(p, Vector3(-16.0, 0.6, -50.13), Vector3(0.0, -1.0, 0.0))
+	var hung := false
+	for i: int in 25:
+		await get_tree().physics_frame
+		hung = hung or p.state in [Player.State.LEDGE_HANG, Player.State.CLIMB]
+	_check_true("kick up: without a kick the 3.0 m ledge is out of reach", not hung)
+	# 壁の方へ倒したまま蹴る → 上へ伸びて縁を掴み、登る
+	await _place(p, Vector3(-16.0, 0.6, -50.13), Vector3(0.0, -1.0, 0.0))
+	await _frames(2)
+	await _tap(&"jump")
+	var climbed := false
+	for i: int in 60:
+		await get_tree().physics_frame
+		climbed = climbed or p.state == Player.State.CLIMB
+	Input.action_release(&"move_forward")
+	_check_true("kick up: kicked and climbed the 3.0 m ledge (y %.2f)" % p.global_position.y, climbed and p.global_position.y > 2.95)
+	p.wall_kicked.disconnect(on_kick)
+	p.perfect.disconnect(on_perfect)
+
+
+## ヴォルトジャンプ：ヴォルトの途中、手で押し切る瞬間にジャンプを押し直すと、障害物の上から速く遠くへ跳ぶ
+func _vault_jump_test(p: Player) -> void:
+	var mp := p.params
+	var c := {"vj": 0, "perfect": 0}
+	var on_vj := func() -> void: c.vj += 1
+	var on_perfect := func(k: StringName) -> void:
+		if k == &"vault_jump":
+			c.perfect += 1
+	p.vault_jumped.connect(on_vj)
+	p.perfect.connect(on_perfect)
+	await _place(p, Vector3(12.0, 0.0, -52.0), Vector3.ZERO)
+	await _frames(3)
+	Input.action_press(&"move_forward")
+	await _seconds(0.5)
+	var face := -61.75
+	while -(face - p.global_position.z) - 0.35 > p.horizontal_speed() * mp.vault_ideal_time:
+		await get_tree().physics_frame
+	var v_in := p.horizontal_speed()
+	await _tap(&"jump")
+	for i: int in 20:
+		if p.state == Player.State.VAULT:
+			break
+		await get_tree().physics_frame
+	_check_true("vault jump: vaulting", p.state == Player.State.VAULT)
+	# 手で押し切る所（障害物の奥の面）に体が来る1フレーム前に押す（スクリプトの入力は1フレーム遅れて効く）
+	while p.state == Player.State.VAULT and p.move.back_dist * p.move_progress < p.move.back_face - v_in / 60.0:
+		await get_tree().physics_frame
+	Input.action_press(&"jump")  # 押し続ける（すぐ離すと普通のジャンプと同じく低くなる）
+	await _frames(2)
+	_check_true("vault jump: jumped off the top (%d)" % c.vj, c.vj == 1)
+	_check_true("vault jump: perfect (%d)" % c.perfect, c.perfect == 1)
+	_check_near("vault jump: speed +5% +3%", p.horizontal_speed(), v_in * (1.0 + mp.vault_jump_bonus + mp.perfect_speed_bonus), 0.2)
+	while p.state == Player.State.AIR:
+		await get_tree().physics_frame
+	Input.action_release(&"jump")
+	Input.action_release(&"move_forward")
+	_check_true("vault jump: landed far past the wall (z %.2f)" % p.global_position.z, p.global_position.z < -62.25 - 6.0)
+	p.vault_jumped.disconnect(on_vj)
+	p.perfect.disconnect(on_perfect)
+
+
+## ぶら下がりから振り向く（クイックターン）と、壁を蹴って後ろへ跳ぶ
+func _ledge_back_kick_test(p: Player) -> void:
+	await _place(p, Vector3(-8.0, 0.8, -27.7), Vector3(0, 0, -2.0))
+	for i: int in 30:
+		await get_tree().physics_frame
+		if p.state == Player.State.LEDGE_HANG:
+			break
+	_check_true("ledge back kick: hanging", p.state == Player.State.LEDGE_HANG)
+	await _tap(&"quick_turn")
+	await get_tree().physics_frame
+	_check_true("ledge back kick: kicked off backwards (state %d, vz %.2f)" % [p.state, p.velocity.z], p.state == Player.State.AIR and p.velocity.z > 3.0)
+	await _seconds(0.6)
+
+
+## スイングバー：走って跳び、バーを掴んで振り、理想の角度で離すとPerfect。勢いを保って前へ遠く飛ぶ
+func _swing_test(p: Player) -> void:
+	var mp := p.params
+	var c := {"grab": 0, "perfect": 0, "crash": 0}
+	var on_grab := func() -> void: c.grab += 1
+	var on_perfect := func(k: StringName) -> void:
+		if k == &"swing":
+			c.perfect += 1
+	var on_crash := func(_s: float) -> void: c.crash += 1
+	p.swing_started.connect(on_grab)
+	p.perfect.connect(on_perfect)
+	p.crashed.connect(on_crash)
+	await _place(p, Vector3(-16.0, 0.0, -60.0), Vector3.ZERO)
+	await _frames(3)
+	Input.action_press(&"move_forward")
+	while p.global_position.z > -67.4:
+		await get_tree().physics_frame
+	var v_in := p.horizontal_speed()
+	Input.action_press(&"jump")
+	await _frames(12)
+	Input.action_release(&"jump")
+	for i: int in 40:
+		if p.state == Player.State.SWING:
+			break
+		await get_tree().physics_frame
+	_check_true("swing: grabbed the bar (%d)" % c.grab, c.grab == 1 and p.state == Player.State.SWING)
+	var ideal := deg_to_rad(mp.swing_ideal_angle)
+	var prev := p.swing_angle
+	for i: int in 120:
+		await get_tree().physics_frame
+		var step := p.swing_angle - prev
+		prev = p.swing_angle
+		if step > 0.0 and p.swing_angle + step >= ideal:
+			break
+	Input.action_press(&"jump")
+	await _frames(2)
+	print("  swing released at %.1f deg (ideal %.1f)" % [rad_to_deg(p.swing_angle), mp.swing_ideal_angle])
+	_check_true("swing: released (state %d)" % p.state, p.state == Player.State.AIR)
+	_check_true("swing: perfect release (%d)" % c.perfect, c.perfect == 1)
+	_check_true("swing: keeps momentum (%.2f -> %.2f m/s)" % [v_in, p.horizontal_speed()], p.horizontal_speed() >= v_in * (1.0 + mp.swing_release_bonus))
+	_check_true("swing: launched upwards (vy %.2f)" % p.velocity.y, p.velocity.y > 3.0)
+	Input.action_release(&"jump")
+	while p.state != Player.State.GROUND:
+		await get_tree().physics_frame
+	Input.action_release(&"move_forward")
+	_check_true("swing: flew far past the bar (z %.2f)" % p.global_position.z, p.global_position.z < -72.0 - 5.0)
+	_check_true("swing: no crash (%d)" % c.crash, c.crash == 0)
+	p.swing_started.disconnect(on_grab)
+	p.perfect.disconnect(on_perfect)
+	p.crashed.disconnect(on_crash)
+
+
+## ジップライン：線の下で跳んで掴む → 重力で加速して滑る → 終点で自動で離す。終点の少し手前でジャンプするとPerfect
+func _zip_test(p: Player) -> void:
+	var mp := p.params
+	var c := {"grab": 0, "perfect": 0}
+	var on_grab := func() -> void: c.grab += 1
+	var on_perfect := func(k: StringName) -> void:
+		if k == &"zip":
+			c.perfect += 1
+	p.zip_started.connect(on_grab)
+	p.perfect.connect(on_perfect)
+	await _place(p, Vector3(16.0, 3.7, -71.0), Vector3(0, 0, -6.0))
+	for i: int in 10:
+		if p.state == Player.State.ZIPLINE:
+			break
+		await get_tree().physics_frame
+	_check_true("zip: grabbed the line", c.grab == 1 and p.state == Player.State.ZIPLINE)
+	var v0 := p.velocity.length()
+	var v_max := 0.0
+	while p.state == Player.State.ZIPLINE:
+		v_max = maxf(v_max, p.velocity.length())
+		await get_tree().physics_frame
+	_check_true("zip: accelerates downhill (%.2f -> %.2f m/s)" % [v0, v_max], v_max > v0 + 3.0)
+	_check_true("zip: let go at the end (z %.2f)" % p.global_position.z, p.global_position.z < -94.5)
+	await _seconds(1.0)
+	# 終点の zip_ideal_time 前にジャンプで離す → Perfect
+	await _place(p, Vector3(16.0, 3.7, -71.0), Vector3(0, 0, -6.0))
+	for i: int in 10:
+		if p.state == Player.State.ZIPLINE:
+			break
+		await get_tree().physics_frame
+	while p.state == Player.State.ZIPLINE and p.zip_remaining_time() > mp.zip_ideal_time + 1.0 / 60.0:
+		await get_tree().physics_frame
+	await _tap(&"jump")
+	await get_tree().physics_frame
+	_check_true("zip: perfect jump-off (%d)" % c.perfect, c.perfect == 1)
+	_check_true("zip: jumped off upwards (vy %.2f)" % p.velocity.y, p.velocity.y > mp.zip_release_up * 0.8)
+	await _seconds(1.0)
+	p.zip_started.disconnect(on_grab)
+	p.perfect.disconnect(on_perfect)
 
 
 ## コースを自動で走る。前進は押しっぱなしで、前方をレイで見てジャンプ・スライド・ローリングを判断する
