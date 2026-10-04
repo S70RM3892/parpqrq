@@ -17,12 +17,14 @@ const AREAS: Array[Dictionary] = [
 		"deco": ["ac", "ac", "tank", "antenna", "house", "pipes", "skylight", "tower", "ac"],
 		"building_tints": [Color(1, 1, 1), Color(0.95, 0.94, 0.9), Color(0.9, 0.92, 0.95), Color(0.97, 0.93, 0.88)],
 		"power_lines": 0.45, "lit": false, "sign_colors": [Color(0.3, 0.55, 0.85), Color(0.9, 0.35, 0.3)],
+		"floors": ["concrete", "concrete", "concrete", "gravel"],
 	},
 	{
 		"name": "Construction Highrise", "jp": "工事中の高層", "time": &"noon", "teach": "climb / ledge grab / vertical wall run",
 		"deco": ["scaffold", "steel", "barrier", "ac", "tank", "house", "steel", "barrier"],
 		"building_tints": [Color(0.86, 0.86, 0.84), Color(0.8, 0.8, 0.79), Color(0.9, 0.88, 0.84)],
 		"power_lines": 0.2, "lit": false, "sign_colors": [Color(0.98, 0.78, 0.12)], "accent": Color(0.98, 0.78, 0.12),
+		"floors": ["concrete", "metal", "metal", "gravel"],
 	},
 	{
 		"name": "Evening Downtown", "jp": "夕方の繁華街", "time": &"evening", "teach": "wall run / wall jump",
@@ -30,6 +32,7 @@ const AREAS: Array[Dictionary] = [
 		"building_tints": [Color(0.95, 0.9, 0.88), Color(0.88, 0.86, 0.9), Color(0.92, 0.92, 0.9)],
 		"power_lines": 0.5, "lit": true,
 		"sign_colors": [Color(1.0, 0.3, 0.55), Color(0.2, 0.85, 1.0), Color(1.0, 0.85, 0.25), Color(0.5, 1.0, 0.45)],
+		"floors": ["concrete", "concrete", "gravel", "metal"],
 	},
 	{
 		"name": "Station at Night", "jp": "夜の駅前", "time": &"night", "teach": "slide / long downhill / everything",
@@ -37,6 +40,7 @@ const AREAS: Array[Dictionary] = [
 		"building_tints": [Color(0.85, 0.87, 0.92), Color(0.9, 0.9, 0.9), Color(0.8, 0.82, 0.88)],
 		"power_lines": 0.35, "lit": true,
 		"sign_colors": [Color(0.3, 0.7, 1.0), Color(1.0, 0.45, 0.3), Color(0.95, 0.95, 1.0), Color(0.4, 1.0, 0.7)],
+		"floors": ["concrete", "metal", "glass", "concrete"],
 	},
 	{
 		"name": "Free Run", "jp": "フリーラン", "time": &"morning", "teach": "no timer, big district",
@@ -137,6 +141,7 @@ static func next_id(id: String) -> String:
 static func recipe(id: String) -> PackedStringArray:
 	var c := get_course(id)
 	var g := _Gen.new(int(c.get("seed", 1)), int(c.get("area", 0)))
+	g.floors = AREAS[int(c.get("area", 0))].get("floors", ["concrete"])
 	for m: String in c.get("motifs", []):
 		g.motif(m)
 	return g.out
@@ -150,12 +155,19 @@ class _Gen:
 	var y: float = 0.0
 	var last_turn: String = "L"
 	var last_side: String = "R"
+	## 屋上の床の素材（足音が変わる）。形の乱数とは別に振る（床を変えてもコースの形とメダルが変わらない）
+	var floors: Array = ["concrete"]
+	var floor_rng := RandomNumberGenerator.new()
 
 	func _init(seed_value: int, p_area: int) -> void:
 		rng.seed = seed_value
+		floor_rng.seed = seed_value * 31 + 7
 		area = p_area
 
 	func add(line: String) -> void:
+		var head := line.get_slice(" ", 0)
+		if head in ["gap", "drop", "up", "ledge", "stairs", "wallrun", "walljump", "beam", "slope", "detour"]:
+			out.append("floor " + str(floors[floor_rng.randi() % floors.size()]))
 		out.append(line)
 		# 屋上の高さを追う（上がりすぎ・下がりすぎを避けるため）
 		var t := line.split(" ", false)
