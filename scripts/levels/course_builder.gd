@@ -617,13 +617,106 @@ func _backdrop_points() -> void:
 	route_points.append(goal_xf.origin)
 
 
-## フリーラン：時間制限なしの大きい区画（仕様書 7章）。あとで作る
-func build_district() -> void:
+## フリーラン：時間制限なしの大きい区画（仕様書 7章）。手触りを味わう場所で、テスト場も兼ねる。
+## n×n のビルを路地（3〜5 m）で区切って並べる。高さはなめらかな乱れで決め、隣との段差に応じて
+## 足場（木箱）・ウォールランの壁・梁・下り坂を置いて、どこからでもどこかへ行けるようにする。
+func build_district(n: int = 7) -> void:
+	var pitch := 21.0
+	var noise := FastNoiseLite.new()
+	noise.seed = rng.randi()
+	noise.frequency = 0.18
+	var heights: Array[PackedFloat32Array] = []
+	var sizes: Array[PackedFloat32Array] = []
+	var half := (n - 1) * 0.5
+	for i: int in n:
+		var row := PackedFloat32Array()
+		var srow := PackedFloat32Array()
+		for j: int in n:
+			var h := snappedf(noise.get_noise_2d(i, j) * 9.0, 0.5)
+			if i == int(half) and j == int(half):
+				h = 0.0
+			row.append(h)
+			srow.append(rng.randf_range(15.5, 18.0))
+		heights.append(row)
+		sizes.append(srow)
+	var center := func(i: int, j: int) -> Vector3:
+		return Vector3((i - half) * pitch, heights[i][j], (j - half) * pitch)
+	for i: int in n:
+		for j: int in n:
+			var c: Vector3 = center.call(i, j)
+			var sz := sizes[i][j]
+			width = sz
+			yaw = 0.0
+			pos = c + Vector3(0, 0, sz * 0.5)
+			floor_kind = [&"concrete", &"concrete", &"gravel", &"metal"][rng.randi() % 4]
+			_open_floor()
+			pos = c - Vector3(0, 0, sz * 0.5)
+			_close_floor(0.0, 1.5)
+			route_points.append(c)
+			min_floor_y = minf(min_floor_y, c.y)
+			# 隣（+x と +z）へのつなぎ
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+				var ni := i + d.x
+				var nj := j + d.y
+				if ni >= n or nj >= n:
+					continue
+				_connect(c, sz, center.call(ni, nj), sizes[ni][nj], Vector3(d.x, 0, d.y))
+	# 真ん中のビルから始める
+	var mid: Vector3 = center.call(int(half), int(half))
+	yaw = 0.0
+	pos = mid + Vector3(0, 0, 4.0)
 	start_xf = frame()
-	_open_floor()
-	_walk(40.0)
-	goal_xf = frame()
-	_close_floor()
+	goal_xf = start_xf
+	safe.append({"xf": start_xf, "dist": 0.0})
 	_place_markers()
+	checkpoints.clear()
 	_decorate()
-	_backdrop_points()
+
+
+## 隣どうしのビルをつなぐ：段差が小さければ跳び移れる。段差に応じて足場・壁・坂を足す
+func _connect(a: Vector3, sa: float, b: Vector3, sb: float, axis: Vector3) -> void:
+	var lo := a if a.y <= b.y else b
+	var hi := b if a.y <= b.y else a
+	var s_lo := sa if a.y <= b.y else sb
+	var s_hi := sb if a.y <= b.y else sa
+	var toward := (hi - lo) * Vector3(1, 0, 1)
+	toward = toward.normalized()
+	var dh := hi.y - lo.y
+	var gap_mid := (a + b) * 0.5
+	var y_deg := rad_to_deg(atan2(-toward.x, -toward.z))
+	var lateral := toward.cross(Vector3.UP)
+	var offset := lateral * rng.randf_range(-4.0, 4.0)
+	var r := rng.randf()
+	if dh > 2.4 and dh <= 4.0:
+		# 低い側の屋上、高い壁の手前に木箱（ヴォルトで乗ってからクライム）
+		var foot := hi - toward * (s_hi * 0.5 + (pitch_gap(a, b, sa, sb)) + 1.2) + offset
+		foot.y = lo.y
+		geo.add_box(foot + Vector3.UP * 0.6, Vector3(2.4, 1.2, 1.6), Mat.ROUTE, Vector3(0, y_deg, 0))
+	elif dh > 4.0 and dh < 9.0 and r < 0.6:
+		# 下り坂（高い側から低い側へ。スライドで下る）
+		var start := hi - toward * (s_hi * 0.5) + offset
+		var end := lo + toward * (s_lo * 0.5) + offset
+		end.y = lo.y
+		var length := start.distance_to(end)
+		var pitch_deg := rad_to_deg(asin((start.y - end.y) / length))
+		var mid := (start + end) * 0.5
+		var nrm := Basis.from_euler(Vector3(deg_to_rad(-pitch_deg), deg_to_rad(y_deg + 180.0), 0)) * Vector3.UP
+		geo.add_box(mid - nrm * 0.25, Vector3(4.0, 0.5, length + 0.4), Mat.ROUTE, Vector3(-pitch_deg, y_deg + 180.0, 0))
+	if dh < 1.0 and r < 0.35:
+		# 路地をまたぐ看板の壁（ウォールラン）
+		var wall_c := gap_mid + lateral * rng.randf_range(-5.0, 5.0)
+		var top := maxf(a.y, b.y) + 4.5
+		var bottom := STREET_Y
+		geo.add_box(Vector3(wall_c.x, (top + bottom) * 0.5, wall_c.z), Vector3(0.5, top - bottom, pitch_gap(a, b, sa, sb) + 10.0),
+				Mat.ROUTE, Vector3(0, y_deg, 0))
+	elif dh < 1.5 and r < 0.6:
+		# 梁
+		var p0 := a + offset
+		var p1 := b + offset
+		var y := minf(a.y, b.y)
+		var mid2 := (p0 + p1) * 0.5
+		geo.add_box(Vector3(mid2.x, y - 0.06, mid2.z), Vector3(1.0, 0.12, p0.distance_to(p1)), Mat.ROUTE, Vector3(0, y_deg, 0))
+
+
+func pitch_gap(a: Vector3, b: Vector3, sa: float, sb: float) -> float:
+	return Vector2(b.x - a.x, b.z - a.z).length() - (sa + sb) * 0.5

@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/levels/greybox.gd" id="1_grey"]
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="2_player"]
@@ -14,15 +14,6 @@ size = Vector3(12, 4, 2)
 
 [sub_resource type="BoxShape3D" id="Box_split"]
 size = Vector3(14, 10, 1)
-
-[sub_resource type="CapsuleMesh" id="Ghost_mesh"]
-radius = 0.35
-height = 1.8
-
-[sub_resource type="StandardMaterial3D" id="Ghost_mat"]
-transparency = 1
-shading_mode = 0
-albedo_color = Color(1, 0.416, 0.102, 0.35)
 
 [sub_resource type="BoxShape3D" id="Box_goal"]
 size = Vector3(10, 6, 6)
@@ -75,12 +66,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -133)
 shape = SubResource("Box_split")
 
 [node name="Ghost" type="Node3D" parent="CourseTimer"]
-
-[node name="Body" type="MeshInstance3D" parent="CourseTimer/Ghost"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
-cast_shadow = 0
-mesh = SubResource("Ghost_mesh")
-surface_material_override/0 = SubResource("Ghost_mat")
 
 [node name="HUD" type="CanvasLayer" parent="CourseTimer"]
 

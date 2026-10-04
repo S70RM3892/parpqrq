@@ -18,6 +18,9 @@ var player: Player
 var timer: CourseTimer
 var free_run: bool = false
 var build_ms: int = 0
+var pause_menu: PauseMenu
+var results: ResultsPanel
+var replay: ReplayViewer
 
 
 func _ready() -> void:
@@ -71,6 +74,85 @@ func _ready() -> void:
 	player.transform = builder.start_xf
 	add_child(player)
 	player.kill_y = builder.min_floor_y - 10.0
+	if free_run:
+		# フリーランは最後に立っていた屋上へ戻す
+		var keep := Timer.new()
+		keep.wait_time = 0.5
+		keep.autostart = true
+		keep.timeout.connect(_remember_footing)
+		add_child(keep)
+	_build_menus()
 	build_ms = Time.get_ticks_msec() - t0
 	print("course %s: %d primitives, %d backdrop buildings, route %.0f m, built in %d ms" % [
 			course_id, geo.primitive_count, backdrop.building_count, builder.route_len, build_ms])
+
+
+## フリーラン：屋上に立っている間、落ちた時の戻り先をそこにする
+func _remember_footing() -> void:
+	if player.state == Player.State.GROUND and player.is_on_floor() and player.horizontal_speed() < player.params.run_speed * 1.5:
+		player.checkpoint = Transform3D(Basis(Vector3.UP, player.rig.yaw), player.global_position)
+
+
+# --- 一時停止・結果・リプレイ ---------------------------------------------------------
+
+func _build_menus() -> void:
+	pause_menu = PauseMenu.new()
+	add_child(pause_menu)
+	pause_menu.retry_requested.connect(restart)
+	pause_menu.checkpoint_requested.connect(func() -> void: player.respawn(player.checkpoint))
+	pause_menu.quit_requested.connect(func() -> void: Game.to_title(true))
+	replay = ReplayViewer.new()
+	add_child(replay)
+	replay.closed.connect(_on_replay_closed)
+	if timer != null:
+		results = ResultsPanel.new()
+		add_child(results)
+		results.retry_requested.connect(restart)
+		results.next_requested.connect(func() -> void: Game.play(CourseCatalog.next_id(course_id)))
+		results.replay_requested.connect(_start_replay)
+		results.courses_requested.connect(func() -> void: Game.to_title(true))
+		timer.finished.connect(_on_finished)
+
+
+## ゴール：入力を止めて結果を出す（体は惰性で少し進んで止まる）
+func _on_finished(r: Dictionary) -> void:
+	player.input_enabled = false
+	player.rig.mouse_capture_enabled = false
+	pause_menu.enabled = false
+	results.show_result(r, CourseCatalog.next_id(course_id) != "")
+
+
+## スタートからやり直す（読み込みなし。仕様書 5章「即リトライ」）
+func restart() -> void:
+	if results != null:
+		results.hide_result()
+	_set_player_active(true)
+	player.input_enabled = true
+	player.rig.mouse_capture_enabled = true
+	pause_menu.enabled = true
+	player.respawn()
+	if not OS.has_feature("mobile"):
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _start_replay() -> void:
+	if timer.last_run == null or timer.last_run.size() == 0:
+		return
+	results.hide_result()
+	_set_player_active(false)
+	replay.play(timer.last_run)
+
+
+func _on_replay_closed() -> void:
+	_set_player_active(true)
+	player.rig.camera.current = true
+	results.show_result(timer.last_result, CourseCatalog.next_id(course_id) != "")
+
+
+## リプレイ中は自分を止めて隠す（カメラ・手足・画面の演出・音）
+func _set_player_active(on: bool) -> void:
+	player.process_mode = Node.PROCESS_MODE_INHERIT if on else Node.PROCESS_MODE_DISABLED
+	player.visible = on
+	(player.get_node("FlowHUD") as CanvasLayer).visible = on
+	(player.get_node("Body") as Node3D).visible = on and Settings.feel_body
+	timer.set_physics_process(on)

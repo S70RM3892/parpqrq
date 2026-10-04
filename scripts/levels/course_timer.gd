@@ -1,11 +1,16 @@
 class_name CourseTimer
 extends Node3D
 ## スタートからゴールまでの計測と、上達が見える仕組み（仕様書 5章「自己ベストとの競争」）。
-## - スタート範囲を出た瞬間に計測開始、ゴール範囲に入ったら停止。リトライで計り直し
+## - スタート範囲を出た瞬間に計測開始、ゴール範囲に入ったら停止。スタートへ戻ったら計り直し
 ## - 区間（Split1, Split2…）を通るたびに、自己ベストの区間タイムとの差を1.5秒だけ出す（緑＝速い、赤＝遅い）
-## - ゴールでタイム・差・メダル・次のメダルまで・最高速度・Perfect数を出す
-## - 自己ベストの走りをゴースト（半透明の自分）として次のプレイに出す
+## - ゴールでタイム・差・メダル・次のメダルまで・最高速度・Perfect数（finished シグナル。白箱コースは上の表示にも出す）
+## - 自己ベストの走りをゴースト（半透明の自分）として次のプレイに出す。走りは全部記録してリプレイに使う
+## - ルートカラーOFFでクリアしたら印を残す（仕様書 6章）
 ## 走行中はそれ以外何も出さない（仕様書 8章）。
+
+signal started
+signal split_passed(index: int, time: float, diff: float)
+signal finished(result: Dictionary)
 
 const SAVE_PATH := "user://best_times.cfg"
 const SPLIT_SHOW := 1.5
@@ -17,11 +22,17 @@ const RED := Color(1.0, 0.45, 0.4)
 @export var course_id: String = "test_course"
 ## メダルの基準タイム（秒）。開発者・ゴールド・シルバー・ブロンズの順
 @export var medal_times: PackedFloat32Array = [15.5, 17.0, 20.0, 25.0]  # 自動走行（Perfect 8回）で16.2秒
+## true = ゴールの結果を上の表示に出す（白箱コース。生成コースは結果画面が出す）
+@export var show_result_label: bool = true
 
 var running: bool = false
 var elapsed: float = 0.0
 ## ゴールした時の結果（テストからも読む）
 var last_result: Dictionary = {}
+## 今の走り（ゴールしたらリプレイに使える）と、自己ベストの走り（ゴースト）
+var recording := RunRecording.new()
+var last_run: RunRecording
+var best_run := RunRecording.new()
 
 var _best: float = INF
 var _best_splits: PackedFloat32Array = []
@@ -29,11 +40,8 @@ var _splits: PackedFloat32Array = []
 var _shown: float = 0.0
 var _max_speed: float = 0.0
 var _perfects_at_start: int = 0
-var _rec_pos: PackedVector3Array = []
-var _rec_yaw: PackedFloat32Array = []
-var _ghost_pos: PackedVector3Array = []
-var _ghost_yaw: PackedFloat32Array = []
 var _player: Player
+var _ghost_body: GhostBody
 
 @onready var _label: Label = $HUD/Time
 @onready var _ghost: Node3D = $Ghost
@@ -46,6 +54,7 @@ static func create(id: String, medals: PackedFloat32Array, start: Transform3D, g
 	t.name = "CourseTimer"
 	t.course_id = id
 	t.medal_times = medals
+	t.show_result_label = false
 	t.add_child(_area("StartArea", start, Vector3(8, 6, 10)))
 	t.add_child(_area("GoalArea", goal, Vector3(12, 12, 3)))
 	for i: int in splits.size():
@@ -83,6 +92,13 @@ static func _area(area_name: String, xf: Transform3D, size: Vector3) -> Area3D:
 	return a
 
 
+static func medal_for(t: float, times: PackedFloat32Array) -> String:
+	for i: int in times.size():
+		if times[i] > 0.0 and t <= times[i]:
+			return MEDALS[i]
+	return ""
+
+
 func _ready() -> void:
 	($StartArea as Area3D).body_exited.connect(_on_start_exited)
 	($GoalArea as Area3D).body_entered.connect(_on_goal_entered)
@@ -92,8 +108,10 @@ func _ready() -> void:
 		splits[i].body_entered.connect(func(body: Node3D) -> void: _on_split(body, idx))
 	_load()
 	_label.text = ""
-	_ghost.visible = false
 	_ghost.top_level = true
+	_ghost_body = GhostBody.new()
+	_ghost.add_child(_ghost_body)
+	_ghost.visible = false
 	_bind_player.call_deferred()
 
 
@@ -116,9 +134,8 @@ func _physics_process(delta: float) -> void:
 	elapsed += delta
 	if _player != null:
 		_max_speed = maxf(_max_speed, _player.horizontal_speed())
-		_rec_pos.append(_player.global_position)
-		_rec_yaw.append(_player.rig.yaw)
-	_update_ghost()
+		recording.add(_player)
+	_update_ghost(delta)
 
 
 ## スタートへ戻ったら計り直し（スタート範囲を出た瞬間にまた始まる）。チェックポイントへ戻った時は計測を続ける
@@ -137,18 +154,21 @@ func _on_start_exited(body: Node3D) -> void:
 	_max_speed = 0.0
 	_perfects_at_start = _player.perfect_count
 	_splits = []
-	_rec_pos = []
-	_rec_yaw = []
-	_ghost.visible = not _ghost_pos.is_empty()
+	recording.clear()
+	_ghost.visible = best_run.size() > 0
+	started.emit()
 
 
 func _on_split(body: Node3D, idx: int) -> void:
 	if not body is Player or not running or idx != _splits.size():
 		return
 	_splits.append(elapsed)
+	var diff := NAN
 	if idx < _best_splits.size():
-		var diff := elapsed - _best_splits[idx]
+		diff = elapsed - _best_splits[idx]
 		_show("%.2f  (%+.2f)" % [elapsed, diff], GREEN if diff <= 0.0 else RED, SPLIT_SHOW)
+	split_passed.emit(idx, elapsed, diff)
+	Audio.ui(&"split", 1.0 if is_nan(diff) or diff <= 0.0 else 0.8)
 
 
 func _on_goal_entered(body: Node3D) -> void:
@@ -157,37 +177,46 @@ func _on_goal_entered(body: Node3D) -> void:
 	running = false
 	_ghost.visible = false
 	var t := elapsed
+	var prev := _best
 	var had_best := _best < INF
 	var diff := t - _best
 	var medal := _medal_for(t)
 	var perfects := _player.perfect_count - _perfects_at_start
-	if t < _best:
+	last_run = recording.duplicate_run()
+	var new_best := t < _best
+	if new_best:
 		_best = t
 		_best_splits = _splits.duplicate()
-		_ghost_pos = _rec_pos.duplicate()
-		_ghost_yaw = _rec_yaw.duplicate()
-		_save()
-	var lines: PackedStringArray = []
-	lines.append("%.2f%s   %s" % [t, ("  (%+.2f)" % diff) if had_best else "", medal if medal != "" else "-"])
-	lines.append("BEST %.2f   TOP %.1f m/s   PERFECT x%d" % [_best, _max_speed, perfects])
+		best_run = last_run
+	var route_off := not Settings.route_color
+	_save(new_best, route_off)
 	var next := _next_medal(t)
-	if next != "":
-		lines.append(next)
-	_show("\n".join(lines), GREEN if not had_best or diff <= 0.0 else RED, RESULT_SHOW)
-	last_result = {"time": t, "medal": medal, "max_speed": _max_speed, "perfects": perfects, "best": _best}
+	last_result = {
+		"time": t, "medal": medal, "max_speed": _max_speed, "perfects": perfects, "best": _best,
+		"prev_best": prev, "new_best": new_best, "route_off": route_off,
+		"next_medal": next.get("medal", ""), "next_time": next.get("time", 0.0),
+	}
+	if show_result_label:
+		var lines: PackedStringArray = []
+		lines.append("%.2f%s   %s" % [t, ("  (%+.2f)" % diff) if had_best else "", medal if medal != "" else "-"])
+		lines.append("BEST %.2f   TOP %.1f m/s   PERFECT x%d" % [_best, _max_speed, perfects])
+		if next.has("medal"):
+			lines.append("NEXT %s %.2f  (-%.2f)" % [next.medal, next.time, t - (next.time as float)])
+		_show("\n".join(lines), GREEN if not had_best or diff <= 0.0 else RED, RESULT_SHOW)
+	Audio.ui(&"goal")
+	finished.emit(last_result)
 
 
-## 記録を別のIDで取り直す（スモークテストが持ち主の自己ベストを上書きしないように）
+## 記録を別のIDで取り直す（スモークテストが持ち主の自己ベストを上書きしない）
 func use_records(id: String, clear: bool) -> void:
 	course_id = id
 	_best = INF
 	_best_splits = []
-	_ghost_pos = []
-	_ghost_yaw = []
+	best_run = RunRecording.new()
 	if clear:
 		var cfg := ConfigFile.new()
 		if cfg.load(SAVE_PATH) == OK:
-			for section: String in ["best", "splits"]:
+			for section: String in ["best", "splits", "route_off"]:
 				if cfg.has_section_key(section, id):
 					cfg.erase_section_key(section, id)
 			cfg.save(SAVE_PATH)
@@ -197,22 +226,23 @@ func use_records(id: String, clear: bool) -> void:
 
 
 func ghost_samples() -> int:
-	return _ghost_pos.size()
+	return best_run.size()
+
+
+func best_time() -> float:
+	return _best
 
 
 func _medal_for(t: float) -> String:
-	for i: int in medal_times.size():
-		if t <= medal_times[i]:
-			return MEDALS[i]
-	return ""
+	return medal_for(t, medal_times)
 
 
-## 次に取れるメダルまであと何秒か
-func _next_medal(t: float) -> String:
+## 次に取れるメダルとその基準タイム（全部取っていれば空）
+func _next_medal(t: float) -> Dictionary:
 	for i: int in range(medal_times.size() - 1, -1, -1):
-		if t > medal_times[i]:
-			return "NEXT %s %.2f  (-%.2f)" % [MEDALS[i], medal_times[i], t - medal_times[i]]
-	return ""
+		if medal_times[i] > 0.0 and t > medal_times[i]:
+			return {"medal": MEDALS[i], "time": medal_times[i]}
+	return {}
 
 
 func _show(text: String, color: Color, time: float) -> void:
@@ -221,14 +251,13 @@ func _show(text: String, color: Color, time: float) -> void:
 	_shown = time
 
 
-func _update_ghost() -> void:
-	if _ghost_pos.is_empty():
+func _update_ghost(delta: float) -> void:
+	if best_run.size() == 0:
 		return
-	var i := mini(_rec_pos.size() - 1, _ghost_pos.size() - 1)
+	var i := mini(recording.size() - 1, best_run.size() - 1)
 	if i < 0:
 		return
-	_ghost.global_position = _ghost_pos[i]
-	_ghost.rotation = Vector3(0.0, _ghost_yaw[i], 0.0)
+	_ghost_body.show_frame(best_run.sample(i), delta)
 
 
 func _split_areas() -> Array[Area3D]:
@@ -253,15 +282,18 @@ func _load() -> void:
 		var f := FileAccess.open(_ghost_path(), FileAccess.READ)
 		var data: Variant = f.get_var()
 		if data is Dictionary:
-			_ghost_pos = data.get("pos", PackedVector3Array())
-			_ghost_yaw = data.get("yaw", PackedFloat32Array())
+			best_run = RunRecording.from_dict(data)
 
 
-func _save() -> void:
+func _save(new_best: bool, route_off: bool) -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(SAVE_PATH)
-	cfg.set_value("best", course_id, _best)
-	cfg.set_value("splits", course_id, _best_splits)
+	if new_best:
+		cfg.set_value("best", course_id, _best)
+		cfg.set_value("splits", course_id, _best_splits)
+	if route_off:
+		cfg.set_value("route_off", course_id, true)
 	cfg.save(SAVE_PATH)
-	var f := FileAccess.open(_ghost_path(), FileAccess.WRITE)
-	f.store_var({"pos": _ghost_pos, "yaw": _ghost_yaw})
+	if new_best:
+		var f := FileAccess.open(_ghost_path(), FileAccess.WRITE)
+		f.store_var(best_run.to_dict())
