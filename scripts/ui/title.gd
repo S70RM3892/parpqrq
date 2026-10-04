@@ -73,6 +73,7 @@ func _build_ui() -> void:
 	_pages[&"main"] = _main_page()
 	_pages[&"courses"] = _courses_page()
 	_pages[&"comfort"] = _comfort_page()
+	_pages[&"controls"] = _controls_page()
 	_settings = SettingsMenu.new()
 	_settings.set_anchors_preset(Control.PRESET_CENTER)
 	_settings.closed.connect(func() -> void: _show(&"main"))
@@ -92,12 +93,12 @@ func _show(page: StringName) -> void:
 			_refresh_courses()
 		&"settings":
 			_settings.open()
-		&"comfort":
+		&"comfort", &"controls":
 			_focus_first(_pages[page])
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed(&"ui_cancel") and _pages[&"courses"].visible:
+	if event.is_action_pressed(&"ui_cancel") and (_pages[&"courses"].visible or _pages[&"controls"].visible):
 		get_viewport().set_input_as_handled()
 		Audio.ui(&"ui_back")
 		_show(&"main")
@@ -131,6 +132,7 @@ func _main_page() -> Control:
 	buttons.add_child(UITheme.button("Play   %s  %s" % [rec, c.get("name", "")], func() -> void: Game.play(rec), 40))
 	buttons.add_child(UITheme.button("Courses", func() -> void: _show(&"courses")))
 	buttons.add_child(UITheme.button("Free Run", func() -> void: Game.play(CourseCatalog.FREE_RUN)))
+	buttons.add_child(UITheme.button("Controls", func() -> void: _show(&"controls")))
 	buttons.add_child(UITheme.button("Settings", func() -> void: _show(&"settings")))
 	if not OS.has_feature("web"):
 		buttons.add_child(UITheme.button("Quit", func() -> void: Audio.quit_game()))
@@ -245,6 +247,58 @@ func _describe(id: String) -> void:
 	_info.text = "%s  %s      best %s\nDEV %s   GOLD %s   SILVER %s   BRONZE %s" % [
 			id, c.name, UITheme.format_time(r.best),
 			UITheme.format_time(m[0]), UITheme.format_time(m[1]), UITheme.format_time(m[2]), UITheme.format_time(m[3])]
+
+
+## 操作と技（走っている間は文字を出さないので、ここで覚える：仕様書 8章）
+const CONTROLS: Array[Array] = [
+	["Move (tilt = walk to run)", "Left stick", "WASD (Shift: walk)"],
+	["Look", "Right stick", "Mouse"],
+	["Jump / vault / climb / wall run", "A / Cross, R2", "Space"],
+	["Crouch: slide / roll on landing", "B / Circle, L2", "Ctrl / C"],
+	["Quick turn", "X / Square", "Q"],
+	["Retry (hold 0.3 s: checkpoint)", "Y / Triangle", "R"],
+	["Pause", "Start", "Esc"],
+]
+const MOVES: PackedStringArray = [
+	"Vault: jump while running at a waist-high obstacle (0.6-1.3 m). Jump 0.15 s before you reach it for a Perfect.",
+	"Climb: jump at a ledge up to 2.4 m. Taller walls up to about 4 m: run straight at them and jump (vertical wall run).",
+	"Wall run: jump along a wall at speed. Jump again to kick off; Perfect if you kick within 0.15 s.",
+	"Slide: crouch while running; slopes keep you accelerating. Jump out of a slide for +8%.",
+	"Roll: crouch just before landing a drop of 2 m or more. Exactly on landing = Perfect.",
+	"Pull back on the stick to brake. Chain moves without stopping to build momentum (the orange glow at the screen edge).",
+]
+
+
+func _controls_page() -> Control:
+	var panel := PanelContainer.new()
+	_center(panel)
+	var m := MarginContainer.new()
+	for side: String in ["left", "right", "top", "bottom"]:
+		m.add_theme_constant_override("margin_" + side, 32)
+	panel.add_child(m)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override(&"separation", 10)
+	v.custom_minimum_size.x = 1400
+	m.add_child(v)
+	v.add_child(UITheme.label("Controls", 48))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override(&"h_separation", 40)
+	grid.add_theme_constant_override(&"v_separation", 6)
+	for h: String in ["", "Controller", "Keyboard + mouse"]:
+		grid.add_child(UITheme.label(h, 22, UITheme.ACCENT))
+	for row: Array in CONTROLS:
+		for i: int in 3:
+			grid.add_child(UITheme.label(row[i], 26, UITheme.INK if i == 0 else UITheme.MUTED))
+	v.add_child(grid)
+	v.add_child(UITheme.label("Moves", 22, UITheme.ACCENT))
+	for line: String in MOVES:
+		var l := UITheme.label(line, 24, UITheme.INK)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size.x = 1300
+		v.add_child(l)
+	v.add_child(UITheme.button("Back", func() -> void: _show(&"main"), 30))
+	return panel
 
 
 func _comfort_page() -> Control:

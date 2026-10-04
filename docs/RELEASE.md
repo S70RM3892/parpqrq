@@ -1,5 +1,16 @@
 # リリース手順（Android APK）
 
+## 1.0.0-rc1（M3 見た目と音 + M4 コンテンツ）
+
+- versionCode 7 / versionName `1.0.0-rc1`、同じ鍵で署名。実機で60fps（docs/M3.md）を確かめたら `1.0.0` にする
+- 起動するとタイトル（初回は「酔いやすい方向け」の選択）。Play を押せばすぐ走れる
+- 16コース（朝の屋上・工事中の高層・夕方の繁華街・夜の駅前）＋フリーラン。メダル・自己ベスト・ゴースト（人形、遠いと矢印）
+- 一時停止（リトライ／チェックポイント／設定／終了）、ゴールの結果、リプレイ（1人称／3人称）
+- 見た目：白い街とルートカラー（遠くは強く、近くは淡く。設定でOFF）、時間帯ごとの空・霧・影、スピードライン・ビネット・塵、照準点
+- 音：風切り・素材別の足音・息づかい・手の音・着地3段階・Perfect、勢い値で重なるBGM
+- 設定画面：酔い対策の全項目、感度、振動、ルートカラー、画質、解像度、フレームレート、音量
+- ローリングの後半にしゃがむとスライドへつながる
+
 ## 0.6.0-beta（M2 技の完成）
 
 - versionCode 6 / versionName `0.6.0-beta`、同じ鍵で署名
@@ -62,7 +73,10 @@ godot --headless --path . --export-release "Android" build/android/parkour-<vers
 ```
 
 4. 確認: `apksigner verify --print-certs build/android/parkour-<version>.apk` の SHA-256 が上と一致すること。
-5. 書き出す前にスモークテストを通す: `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`
+5. 書き出す前にテストを通す:
+   - `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn`（技の数値）
+   - `godot --headless --path . --fixed-fps 60 res://tests/course_test.tscn`（全コースを走りきれるか）
+   - `godot --headless --path . --fixed-fps 60 res://tests/flow_test.tscn`（画面の流れ）
 
 ## インストール
 
