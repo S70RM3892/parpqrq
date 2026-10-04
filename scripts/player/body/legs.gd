@@ -9,7 +9,7 @@ const KNEE_OFFSET := Vector3(0.0, -0.3467, -0.0251)
 const ANKLE_OFFSET := Vector3(0.0, -0.4507, 0.0553)
 const SOLE_BELOW_ANKLE := 0.0825
 const HIP_WIDTH := 0.11
-const BODY_BACK := 0.12   ## 脚をカメラより少し後ろに置き、下を見た時に足先が見えるようにする
+const BODY_BACK := 0.0    ## 脚の前後位置（+で後ろ）。胴体が無いので真下に置く
 
 @export var player: Player
 

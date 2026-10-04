@@ -58,7 +58,7 @@ func _pose(side: float, p: Player) -> Transform3D:
 			theta = -75.0
 		Player.State.HARD_LAND:
 			var t := p.state_time / prm.hard_land_stun
-			theta = -18.0 if t < 0.5 else REST_DEG
+			theta = 0.0 if t < 0.5 else REST_DEG  # 両手を前に出して着地を受ける
 	var xf := _arm(side, theta)
 	if p.state == Player.State.VAULT and p.vault != null and (side < 0.0 or p.vault.onto):
 		var u := p.vault_progress
