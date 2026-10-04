@@ -115,6 +115,10 @@ func _run_course(c: Dictionary, index: int) -> Dictionary:
 		_failed += 1
 		ok = false
 		print("FAIL %s: lightmap stale or missing (run: godot --headless --path . res://tools/bake_lighting.tscn -- --only=%s)" % [c.id, c.id])
+	if not any.dev_ghost_ok:
+		_failed += 1
+		ok = false
+		print("FAIL %s: dev ghost stale or missing (run: godot --headless --path . --fixed-fps 60 res://tools/record_dev_ghosts.tscn -- --only=%s)" % [c.id, c.id])
 	var saves := ""
 	var saves_h := ""
 	var sug := {"medals": [], "weak": false}
@@ -267,7 +271,7 @@ func _run_once(c: Dictionary, take_shortcuts: bool, human: bool, seed_value: int
 			"perfect": counts.perfect, "route_len": course.builder.route_len, "build_ms": course.build_ms,
 			"goal_dist": course.builder.goal_dist, "cp_count": course.builder.checkpoints.size(), "cp_gap": course.builder.max_checkpoint_gap(),
 			"shortcuts": shortcuts, "found": course.timer.shortcuts_found(), "hint": course.hint_shortcut,
-			"lightmap_ok": course.lightmap_ok}
+			"lightmap_ok": course.lightmap_ok, "dev_ghost_ok": course.dev_ghost_ok}
 	bot.queue_free()
 	course.queue_free()
 	await get_tree().physics_frame

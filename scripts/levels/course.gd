@@ -21,6 +21,10 @@ var free_run: bool = false
 var build_ms: int = 0
 ## 焼いた光がこのコースの形に合っているか（false = 焼き直していない。コーステストが落とす）
 var lightmap_ok: bool = false
+## コースの形の指紋（焼いた光と開発者のゴーストがこの形で作られたかを確かめる）
+var geometry_hash: String = ""
+## 開発者のゴーストがこのコースの形に合っているか（false = 記録し直していない。コーステストが落とす）
+var dev_ghost_ok: bool = false
 var pause_menu: PauseMenu
 var results: ResultsPanel
 var replay: ReplayViewer
@@ -48,6 +52,7 @@ func _ready() -> void:
 		builder.build(CourseCatalog.recipe(course_id))
 	geo.build()
 	add_child(geo)
+	geometry_hash = geo.lightmap_hash
 	lightmap_ok = LevelLighting.apply(geo, course_id)
 	if bool(area.get("lit", false)):
 		_spawn_lights(geo.lights, LevelStyle.night_amount_for(area.time))
@@ -84,6 +89,7 @@ func _ready() -> void:
 		timer = CourseTimer.create(course_id, PackedFloat32Array(def.get("medals", [])), builder.start_xf, builder.goal_xf, builder.splits)
 		add_child(timer)
 		timer.set_shortcuts(builder.shortcuts)
+		_load_dev_ghost()
 		timer.shortcut_found.connect(func(sc_name: String, _found: int, _total: int) -> void:
 			if sc_name == hint_shortcut:
 				update_shortcut_hint())
@@ -142,6 +148,18 @@ func _spawn_lights(list: Array[Dictionary], night_k: float) -> void:
 		light.distance_fade_begin = 70.0
 		light.distance_fade_length = 20.0
 		add_child(light)
+
+
+## 開発者のゴースト（assets/ghosts/<id>.res）。形が記録した時と違えば使わない
+func _load_dev_ghost() -> void:
+	var path := GhostData.path_for(course_id)
+	if not ResourceLoader.exists(path):
+		return
+	var g := load(path) as GhostData
+	if g == null or g.fingerprint != geometry_hash:
+		return
+	dev_ghost_ok = true
+	timer.set_dev_ghost(RunRecording.from_dict(g.run), g.time)
 
 
 ## フリーラン：屋上に立っている間、落ちた時の戻り先をそこにする

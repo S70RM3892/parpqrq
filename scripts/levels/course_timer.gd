@@ -22,6 +22,7 @@ const RESULT_SHOW := 6.0
 const MEDALS: PackedStringArray = ["DEV", "ACE", "GOLD", "SILVER", "BRONZE"]
 ## 近道の目印が出る条件：自己ベストがシルバー以内（MEDALS の番号）、または同じコースを HINT_FINISHES 回ゴールした
 const SILVER_INDEX := 3
+const GOLD_INDEX := 2
 const HINT_FINISHES := 5
 const GREEN := Color(0.4, 1.0, 0.5)
 const GOLD := Color(1.0, 0.85, 0.35)
@@ -52,6 +53,11 @@ var _max_speed: float = 0.0
 var _perfects_at_start: int = 0
 var _player: Player
 var _ghost_body: GhostBody
+## 開発者のゴースト（ゴールドを取ると一緒に走る。近道を全部通る自動走行の記録）
+var dev_run := RunRecording.new()
+var dev_time: float = 0.0
+var _dev_body: GhostBody
+var _dev_node: Node3D
 ## 隠れた近道（Course が渡す：CourseBuilder.shortcuts）。{name, found_xf, found_size, found_states（状態の名前）, ...}
 var shortcuts: Array[Dictionary] = []
 ## これまでに見つけた近道の名前（保存する）／この走りで通った近道／この走りで初めて見つけた近道
@@ -145,7 +151,27 @@ func _ready() -> void:
 	_ghost_body = GhostBody.new()
 	_ghost.add_child(_ghost_body)
 	_ghost.visible = false
+	_dev_node = Node3D.new()
+	_dev_node.name = "DevGhost"
+	_dev_node.top_level = true
+	add_child(_dev_node)
+	_dev_body = GhostBody.new()
+	_dev_body.color = Color(0.75, 0.95, 1.0, 0.42)
+	_dev_node.add_child(_dev_body)
+	_dev_node.visible = false
 	_bind_player.call_deferred()
+
+
+## 開発者のゴーストを渡す（Course が assets/ghosts から読む）
+func set_dev_ghost(run: RunRecording, time: float) -> void:
+	dev_run = run
+	dev_time = time
+
+
+## 開発者のゴーストと走れるか：ゴールド以内の自己ベストがある（MEDALS の GOLD）
+func dev_ghost_unlocked() -> bool:
+	return dev_run.size() > 0 and medal_times.size() > GOLD_INDEX and medal_times[GOLD_INDEX] > 0.0 \
+			and _best <= medal_times[GOLD_INDEX]
 
 
 func _bind_player() -> void:
@@ -179,6 +205,7 @@ func _on_respawned(to_start: bool) -> void:
 	if to_start:
 		running = false
 		_ghost.visible = false
+		_dev_node.visible = false
 		_found_run.clear()
 		_new_run = 0
 
@@ -197,6 +224,7 @@ func _on_start_exited(body: Node3D) -> void:
 	_new_run = 0
 	recording.clear()
 	_ghost.visible = best_run.size() > 0
+	_dev_node.visible = dev_ghost_unlocked()
 	started.emit()
 
 
@@ -217,6 +245,7 @@ func _on_goal_entered(body: Node3D) -> void:
 		return
 	running = false
 	_ghost.visible = false
+	_dev_node.visible = false
 	var t := elapsed
 	var prev := _best
 	var had_best := _best < INF
@@ -239,7 +268,8 @@ func _on_goal_entered(body: Node3D) -> void:
 		"next_medal": next.get("medal", ""), "next_time": next.get("time", 0.0),
 		"shortcuts_total": shortcuts.size(), "shortcuts_found": _found.size(),
 		"shortcuts_used": _found_run.size(), "new_shortcuts": _new_run,
-		"hint_on": medal_times.size() > 1 and _best <= medal_times[1] and _found.size() < shortcuts.size(),
+		"hint_on": hint_for(_best, medal_times, _finishes) and _found.size() < shortcuts.size(),
+		"dev_ghost": dev_ghost_unlocked(), "dev_time": dev_time,
 	}
 	if show_result_label:
 		var lines: PackedStringArray = []
@@ -377,6 +407,10 @@ func _show(text: String, color: Color, time: float) -> void:
 
 
 func _update_ghost(delta: float) -> void:
+	if _dev_node.visible:
+		var d := mini(recording.size() - 1, dev_run.size() - 1)
+		if d >= 0:
+			_dev_body.show_frame(dev_run.sample(d), delta)
 	if best_run.size() == 0:
 		return
 	var i := mini(recording.size() - 1, best_run.size() - 1)
