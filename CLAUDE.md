@@ -24,7 +24,7 @@
 - `scenes/ui/tuning_panel.tscn` — 数値の調整パネル（F1 / R3）
 - `scripts/ui/flow_hud.gd` + `shaders/flow_edge.gdshader` — 勢い値（画面の縁の光）とPerfect表示・スロー
 - `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義、開発用）、`course_timer.gd` — 計測・区間タイム・メダル・記録（`run_recording.gd`）、`checkpoint.gd` — 落下時の戻り先
-- `scripts/levels/course_catalog.gd` — 16コース＋フリーランの一覧（型の並び→レシピ）とメダル、`course_builder.gd` — レシピから屋上を組み立てる（書き方は先頭。隠れた近道のある区間 `detour` / `swinggap` / `zipjog` / `kickwall` は主ルートの道しるべと近道の道しるべを両方作る）、`course_props.gd` — 屋上の小物、`course.gd` + `scenes/levels/course.tscn` — 1本のコース（一時停止・結果・リプレイもここ）
+- `scripts/levels/course_catalog.gd` — 16コース＋フリーランの一覧（型の並び→レシピ）とメダル5段（開発者・エース・ゴールド・シルバー・ブロンズ）、`course_builder.gd` — レシピから屋上を組み立てる（書き方は先頭。隠れた近道のある区間 `detour` / `swinggap` / `zipjog` / `kickwall` は主ルートの道しるべと近道の道しるべを両方作る）、`course_props.gd` — 屋上の小物、`course.gd` + `scenes/levels/course.tscn` — 1本のコース（一時停止・結果・リプレイもここ）
 - `scripts/levels/level_geometry.gd` — 箱・円柱を材質×区画ごとに1メッシュへまとめる、`level_style.gd` + `shaders/level.gdshader` — 街の材質とルートカラー、`atmosphere.gd` — 時間帯（空・太陽・霧）、`backdrop.gd` — 遠景
 - `scripts/autoload/game.gd` — タイトル↔コースの流れと記録の読み出し、`audio.gd` — BGM（勢い値で3層）とメニューの音、`scripts/player/player_audio.gd` — プレイヤーの音
 - `scripts/ui/` — `title.gd`（タイトル・コース選択・操作説明・初回の酔い対策）、`settings_menu.gd`、`pause_menu.gd`、`results_panel.gd`、`replay_viewer.gd`、`ui_theme.gd`
@@ -36,7 +36,7 @@
 - 変更のたびに Godot MCP（`.mcp.json`）で実行し、出力のエラーを読んで自分で直す。
 - コミット前にテストを3つ通す（どれも終了コード0で合格）:
   - スモークテスト `godot --headless --path . --fixed-fps 60 res://tests/smoke_test.tscn` — 白箱コースを自動で走り、全技が仕様どおり出るか
-  - コーステスト `godot --headless --path . --fixed-fps 60 res://tests/course_test.tscn` — 全16コースを自動走行（`tests/autopilot.gd`）で主ルートだけ・近道を全部通る の2回走る。近道はどれも0.25秒以上速く、発見の判定が合っているか。コースを変えたら出てきたメダルの目安を `course_catalog.gd` に写す（開発者 = 近道の走り、ゴールド = 主ルートの走り）
+  - コーステスト `godot --headless --path . --fixed-fps 60 res://tests/course_test.tscn` — 全16コースを自動走行（`tests/autopilot.gd`）で、完璧な走りと人の模型（押す瞬間が4〜8フレーム遅れる）それぞれの主ルートだけ・近道を全部通る の4回走る。完璧な走りの近道はどれも0.25秒以上速く、発見の判定・近道の目印・チェックポイントの間隔（150 m以下、シルバーのペースで20秒以下）が合っているか。コースを変えたら出てきたメダルの目安5つ（開発者・エース・ゴールド・シルバー・ブロンズ）を、**全コースを走らせた**出力から `course_catalog.gd` に写す（式と表は docs/BALANCE.md。`--only` は数フレームずれる）
   - 画面の流れ `godot --headless --path . --fixed-fps 60 res://tests/flow_test.tscn` — タイトル→コース→結果→リプレイ→一時停止→コース選択→フリーラン
 - Godot MCP が動かない環境（ディスプレイなし）では `xvfb-run -a godot --path . --audio-driver Dummy --quit-after 240` で描画ありの実行をして出力を読む
 - 手触りの数値（ジャンプの高さ、カメラ演出の強さなど `MovementParams` と演出の値）は勝手に変えない。持ち主が走りながら決める。

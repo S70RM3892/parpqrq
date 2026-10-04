@@ -29,6 +29,8 @@ func _draw() -> void:
 		draw_arc(c, r, 0.0, TAU, 32, col.darkened(0.25), 3.0, true)
 		if medal == "DEV":
 			draw_circle(c, r * 0.35, Color.WHITE)
+		elif medal == "ACE":
+			draw_arc(c, r * 0.55, 0.0, TAU, 24, col.darkened(0.45), 3.0, true)  # 白金：二重の輪（ゴールド・シルバーの丸と見分ける）
 	if route_off:
 		var p := c + Vector2(r * 0.9, -r * 0.9)
 		var d := r * 0.42

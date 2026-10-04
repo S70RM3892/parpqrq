@@ -2,7 +2,7 @@ class_name Course
 extends Node3D
 ## 1本のコース（仕様書 7章）。CourseCatalog のレシピから実行時に組み立てる（読み込み画面なしで数百ms）。
 ## 子: Atmosphere（空・霧・太陽）、Geometry（屋上と小物）、GrabLines（スイングバー・ジップライン）、Backdrop（遠景）、
-## CourseTimer、Checkpoint、Player、ShortcutHint（金メダルの後、まだ見つけていない近道の入口に出す目印）
+## CourseTimer、Checkpoint、Player、ShortcutHint（シルバー以内か5回ゴールした後、まだ見つけていない近道の入口に出す目印）
 
 const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 const CHECKPOINT_SIZE := Vector3(16, 8, 2)
@@ -24,7 +24,7 @@ var lightmap_ok: bool = false
 var pause_menu: PauseMenu
 var results: ResultsPanel
 var replay: ReplayViewer
-## 近道の目印（金メダルを取ったら、まだ見つけていない近道を1つだけ示す）
+## 近道の目印（シルバー以内か5回ゴールしたら、まだ見つけていない近道を1つだけ示す）
 var _hint: LevelGeometry
 var hint_shortcut: String = ""
 
@@ -150,8 +150,9 @@ func _remember_footing() -> void:
 		player.checkpoint = Transform3D(Basis(Vector3.UP, player.rig.yaw), player.global_position)
 
 
-## 近道の目印：自己ベストがゴールド以上で、まだ見つけていない近道があれば、その入口に光る菱形と細い光の柱を出す。
-## 1つ見つけたら次へ移る（全部の答えは見せない）。Neon White は金メダルの後に近道の場所を示す
+## 近道の目印：自己ベストがシルバー以内（または同じコースを5回ゴール）で、まだ見つけていない近道があれば、
+## その入口に光る菱形と細い光の柱を出す。1つ見つけたら次へ移る（全部の答えは見せない）。
+## Neon White は繰り返し遊ぶほどヒントが開く（条件は CourseTimer.hint_for）
 func update_shortcut_hint() -> void:
 	if _hint != null:
 		_hint.queue_free()
@@ -159,8 +160,7 @@ func update_shortcut_hint() -> void:
 	hint_shortcut = ""
 	if timer == null or builder.shortcuts.is_empty():
 		return
-	var medals: Array = def.get("medals", [])
-	if medals.size() < 2 or timer.best_time() > float(medals[1]):
+	if not timer.hint_unlocked():
 		return
 	for sc: Dictionary in builder.shortcuts:
 		if timer.is_shortcut_found(sc.name):
@@ -201,7 +201,7 @@ func _build_menus() -> void:
 
 ## ゴール：入力を止めて結果を出す（体は惰性で少し進んで止まる）
 func _on_finished(r: Dictionary) -> void:
-	update_shortcut_hint()  # 初めて金メダルを取ったら、リトライからもう目印が出る
+	update_shortcut_hint()  # 初めてシルバー以内か5回目のゴールなら、リトライからもう目印が出る
 	player.input_enabled = false
 	player.rig.mouse_capture_enabled = false
 	pause_menu.enabled = false
