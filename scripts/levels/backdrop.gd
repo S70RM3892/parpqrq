@@ -22,6 +22,14 @@ var _rng := RandomNumberGenerator.new()
 var _movers: Array[Dictionary] = []
 var _mm: MultiMesh
 var _time: float = 0.0
+## 屋上の旗（揺れる布）と湯気の出る所
+var _flags: Array[Transform3D] = []
+var _flag_colors: Array[Color] = []
+var _steam: PackedVector3Array = []
+const WIND := Vector3(0.8, 0.0, 0.6)
+## エリアごとの湯気の色（空気の色に合わせる）
+const STEAM_TINT: Array[Color] = [Color(0.95, 0.93, 0.9, 0.5), Color(0.95, 0.96, 0.98, 0.45), Color(0.98, 0.78, 0.68, 0.45),
+		Color(0.32, 0.34, 0.42, 0.5), Color(0.95, 0.93, 0.9, 0.5)]
 
 
 ## points = ルートの点、street_y = 通りの高さ、roof_y = だいたいの屋上の高さ、area = エリア（0〜3、4 = フリーラン）
@@ -61,6 +69,8 @@ func build(points: PackedVector3Array, street_y: float, roof_y: float, seed_valu
 	_street(lo, hi, street_y)
 	if area == 0:
 		_birds(pts, roof_y)
+	_make_flags()
+	_make_steam(STEAM_TINT[clampi(area, 0, STEAM_TINT.size() - 1)])
 
 
 func _nearest(pts: Array[Vector2], c: Vector2) -> float:
@@ -117,6 +127,17 @@ func _building(foot: Vector3, w: float, d: float, top: float, far: float) -> voi
 				_box(Vector3(foot.x, y + 0.6, foot.z) + off, Vector3(2.2, 1.2, 1.0), yaw, Kind.ROOF_BOX, seed_k * 0.3)
 			else:
 				_box(Vector3(foot.x, y + 3.0, foot.z) + off, Vector3(0.15, 6.0, 0.15), 0.0, Kind.STEEL, seed_k)
+	# 屋上の旗（ポールの先で風になびく）と、室外機の湯気
+	if far < 0.7 and not tall:
+		var r2 := _rng.randf()
+		var corner := Vector3(foot.x, y, foot.z) + b * Vector3(tw * 0.42, 0, -td * 0.42)
+		if r2 < 0.14:
+			_box(corner + Vector3.UP * 3.5, Vector3(0.12, 7.0, 0.12), 0.0, Kind.STEEL, 0.5)
+			var fb := Basis.looking_at(Vector3(WIND.z, 0, -WIND.x), Vector3.UP)  # 旗の +X が風下
+			_flags.append(Transform3D(fb, corner + Vector3.UP * 6.3))
+			_flag_colors.append(Color(_rng.randf(), _rng.randf(), 0.0, 0.0))
+		elif r2 < 0.24 and _steam.size() < 10:
+			_steam.append(Vector3(foot.x, y + 1.4, foot.z) + b * Vector3(-tw * 0.25, 0, td * 0.2))
 	# 高い塔には夜に点滅する赤い航空障害灯
 	if tall:
 		for s: Vector2 in [Vector2(-0.45, -0.45), Vector2(0.45, 0.45)]:
@@ -166,8 +187,13 @@ func _landmark(area: int, pts: Array[Vector2], lo: Vector2, hi: Vector2, base_y:
 				var idx := _xforms.size()
 				_box(top + Vector3(14.0, 2.0, 0.0), Vector3(48.0, 1.6, 1.8), 0.0, Kind.STEEL, 0.9)
 				_box(top + Vector3(-12.0, 1.0, 0.0), Vector3(5.0, 3.5, 3.0), 0.0, Kind.ROOF_BOX, 0.95)
+				# 吊り荷（ワイヤーと鉄骨の束。腕の先で振り子のように揺れる）
+				var hook := _xforms.size()
+				var drop := _rng.randf_range(14.0, 26.0)
+				_box(top + Vector3(30.0, 1.2 - drop * 0.5, 0.0), Vector3(0.12, drop, 0.12), 0.0, Kind.STEEL, 0.5)
+				_box(top + Vector3(30.0, 1.2 - drop - 0.8, 0.0), Vector3(6.0, 1.2, 1.6), 0.0, Kind.ROOF_BOX, 0.2)
 				_movers.append({"first": idx, "count": 2, "pivot": top, "speed": _rng.randf_range(0.03, 0.06) * (1.0 if i % 2 == 0 else -1.0),
-						"phase": _rng.randf() * TAU})
+						"phase": _rng.randf() * TAU, "hook": hook, "hook_at": Vector3(30.0, 1.2, 0.0), "drop": drop})
 		2:
 			# 大きな画面のビル（夕方から光る。画面の絵はシェーダーが動かす）
 			var h := roof_y - base_y + 90.0
@@ -223,6 +249,66 @@ func _make_multimesh() -> void:
 	mat.shader = load("res://shaders/backdrop.gdshader")
 	mmi.material_override = mat
 	add_child(mmi)
+
+
+## 屋上の旗（MultiMesh 1つ。布のなびきは flag.gdshader）
+func _make_flags() -> void:
+	if _flags.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(2.4, 1.5)
+	plane.subdivide_width = 10
+	plane.subdivide_depth = 3
+	plane.orientation = PlaneMesh.FACE_Z
+	plane.center_offset = Vector3(1.2, 0, 0)
+	mm.mesh = plane
+	mm.instance_count = _flags.size()
+	for i: int in _flags.size():
+		mm.set_instance_transform(i, _flags[i])
+		mm.set_instance_custom_data(i, _flag_colors[i])
+	var mi := MultiMeshInstance3D.new()
+	mi.name = "Flags"
+	mi.multimesh = mm
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/flag.gdshader")
+	mi.material_override = mat
+	add_child(mi)
+
+
+## 室外機の湯気（煙の玉が昇って風に流され、薄れて消える。MultiMesh 1つ、steam.gdshader）
+func _make_steam(tint: Color) -> void:
+	if _steam.is_empty():
+		return
+	const PUFFS := 7
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1.0, 1.0)
+	mm.mesh = quad
+	mm.instance_count = _steam.size() * PUFFS
+	var i := 0
+	for p: Vector3 in _steam:
+		var seed_k := _rng.randf()
+		for k: int in PUFFS:
+			mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p))
+			mm.set_instance_custom_data(i, Color(float(k) / PUFFS, seed_k, 0.0, 0.0))
+			i += 1
+	var mi := MultiMeshInstance3D.new()
+	mi.name = "Steam"
+	mi.multimesh = mm
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.extra_cull_margin = 20.0
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/steam.gdshader")
+	mat.set_shader_parameter(&"tint", tint)
+	mat.set_shader_parameter(&"wind", WIND)
+	mi.material_override = mat
+	add_child(mi)
 
 
 ## 谷底の通り（高さフォグで白く消える）。夕方・夜は車のライトが流れる（street.gdshader）
@@ -293,3 +379,13 @@ func _process(delta: float) -> void:
 				var base_xf := _xforms[i]
 				var rel := base_xf.origin - pivot
 				_mm.set_instance_transform(i, Transform3D(rot * base_xf.basis, pivot + rot * rel))
+			if m.has("hook"):
+				# 腕の先の吊り荷：旋回に遅れて振れる振り子
+				var at: Vector3 = pivot + rot * (m.hook_at as Vector3)
+				var drop: float = m.drop
+				var sway := Basis(rot * Vector3.FORWARD, sin(_time * 0.9 + float(m.phase)) * 0.1) \
+						* Basis(rot * Vector3.RIGHT, sin(_time * 0.7 + float(m.phase) * 2.0) * 0.06)
+				var down := sway * Vector3.DOWN
+				var h := int(m.hook)
+				_mm.set_instance_transform(h, Transform3D(sway * rot * Basis.IDENTITY.scaled(Vector3(0.12, drop, 0.12)), at + down * drop * 0.5))
+				_mm.set_instance_transform(h + 1, Transform3D(sway * rot * Basis.IDENTITY.scaled(Vector3(6.0, 1.2, 1.6)), at + down * (drop + 0.8)))
