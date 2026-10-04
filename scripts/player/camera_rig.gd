@@ -134,6 +134,13 @@ func snap(new_yaw: float, new_pitch: float = 0.0) -> void:
 		global_position = eye.global_position
 
 
+## 視線を直接決める（自動走行・リプレイ用。演出の状態は消さない）
+func set_look(new_yaw: float, new_pitch: float) -> void:
+	yaw = wrapf(new_yaw, -PI, PI)
+	pitch = new_pitch
+	_apply_rotation()
+
+
 ## クイックターン：angle（ラジアン）を time 秒で回す
 func start_turn(angle: float, time: float) -> void:
 	_turn_left += angle

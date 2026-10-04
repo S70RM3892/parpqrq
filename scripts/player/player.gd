@@ -452,6 +452,10 @@ func _roll(delta: float) -> void:
 	elif t >= 0.5 and _since_jump_press <= params.move_buffer:
 		_set_state(State.GROUND)
 		_ground_move_or_jump()
+	elif t >= 0.5 and _since_crouch_press <= params.move_buffer and horizontal_speed() >= params.slide_min_speed:
+		# 転がり終わりにしゃがみを先行入力していれば、そのままスライドへ（ローリング → スライド）
+		_set_state(State.GROUND)
+		_try_slide()
 	elif t >= 1.0:
 		_set_state(State.GROUND)
 

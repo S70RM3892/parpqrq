@@ -39,6 +39,50 @@ var _player: Player
 @onready var _ghost: Node3D = $Ghost
 
 
+## 実行時に組むコース用：スタート・ゴール・区間の範囲とゴースト・表示を子に作った計測を返す（シーンで作る時と同じ形）
+static func create(id: String, medals: PackedFloat32Array, start: Transform3D, goal: Transform3D,
+		splits: Array[Transform3D]) -> CourseTimer:
+	var t := CourseTimer.new()
+	t.name = "CourseTimer"
+	t.course_id = id
+	t.medal_times = medals
+	t.add_child(_area("StartArea", start, Vector3(8, 6, 10)))
+	t.add_child(_area("GoalArea", goal, Vector3(12, 12, 3)))
+	for i: int in splits.size():
+		t.add_child(_area("Split%d" % (i + 1), splits[i], Vector3(18, 40, 1.5)))
+	var ghost := Node3D.new()
+	ghost.name = "Ghost"
+	t.add_child(ghost)
+	var hud := CanvasLayer.new()
+	hud.name = "HUD"
+	var label := Label.new()
+	label.name = "Time"
+	label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	label.offset_left = -400.0
+	label.offset_right = 400.0
+	label.offset_top = 40.0
+	label.offset_bottom = 200.0
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	label.add_theme_constant_override(&"outline_size", 8)
+	label.add_theme_font_size_override(&"font_size", 48)
+	hud.add_child(label)
+	t.add_child(hud)
+	return t
+
+
+static func _area(area_name: String, xf: Transform3D, size: Vector3) -> Area3D:
+	var a := Area3D.new()
+	a.name = area_name
+	a.transform = xf.translated_local(Vector3(0, size.y * 0.5 - 1.0, 0))
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	cs.shape = box
+	a.add_child(cs)
+	return a
+
+
 func _ready() -> void:
 	($StartArea as Area3D).body_exited.connect(_on_start_exited)
 	($GoalArea as Area3D).body_entered.connect(_on_goal_entered)

@@ -32,7 +32,7 @@ const PRESETS: Dictionary[StringName, Dictionary] = {
 	&"night": {
 		"top": Color(0.015, 0.02, 0.06), "horizon": Color(0.13, 0.12, 0.24), "ground": Color(0.04, 0.04, 0.07),
 		"sun": Color(0.6, 0.7, 1.0), "sun_energy": 0.45, "elevation": 38.0, "azimuth": 140.0,
-		"ambient": 1.4, "fog": Color(0.1, 0.1, 0.19), "fog_end": 220.0, "fog_max": 0.95,
+		"ambient": 1.1, "fog": Color(0.1, 0.1, 0.19), "fog_end": 220.0, "fog_max": 0.95,
 		"exposure": 1.25, "contrast": 1.05, "saturation": 1.1, "night": 1.0, "stars": 1.0,
 		"cloud": Color(0.2, 0.2, 0.32, 0.6), "cloud_shade": Color(0.1, 0.1, 0.16), "coverage": 0.56,
 	},
