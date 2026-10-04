@@ -112,15 +112,17 @@ void fragment() {
 		}
 	}
 	if (pattern == 5 && side && size.y - p.y > 1.3) {
-		// ビル：上端の手すり壁（1.3 m）より下に窓。奥に部屋が見え、夜は所々灯る
-		Window w = city_window(p.x, size.y - p.y - 1.3, rnd, VERTEX, TANGENT, BINORMAL, NORMAL, night);
-		col = mix(col, w.albedo, w.mask);
-		rough = mix(rough, w.rough, w.mask);
-		spec = mix(spec, 0.5, w.mask);
-		metal = mix(metal, w.metal, w.mask);
-		emit += w.emission;
-		nxy += w.nxy;
-		cavity *= w.cavity;
+		// ビル：上端の手すり壁（1.3 m）より下に窓。ビルごとに外壁の種類が違う（普通の窓・ベランダ・ガラス・古いビル）。
+		// 奥に部屋が見え、夜は所々灯る（city.gdshaderinc）
+		int fk = rnd < 0.5 ? 0 : (rnd < 0.7 ? 2 : (rnd < 0.85 ? 1 : 4));
+		Facade f = city_facade(fk, p.x, size.y - p.y - 1.3, rnd, col, VERTEX, TANGENT, BINORMAL, NORMAL, night);
+		col = f.albedo;
+		rough = f.rough;
+		metal = f.metal;
+		spec = mix(spec, 0.5, step(rough, 0.3));
+		emit += f.emission;
+		nxy += f.bend;
+		cavity *= f.ao;
 	} else if (pattern == 2) {
 		// 金属：側面は細いリブ
 		if (!top) {

@@ -106,3 +106,86 @@ Window city_window(float px, float py, float seed, vec3 view_pos, vec3 tangent, 
 	w.emission = mix(day, nite, night_k);
 	return w;
 }
+
+struct Facade {
+	vec3 albedo;
+	float rough;
+	float metal;
+	vec3 emission;
+	float ao;
+	vec2 bend;      // 接空間の法線の傾き（x = 横、y = 上）
+};
+
+// ビルの外壁（窓の帯の上端から下の部分）。kind: 0 普通の窓、1 ガラスのカーテンウォール、2 ベランダのある集合住宅、
+// 4 古いビル、5 黒いガラス。u = 壁の横の位置 m、down = 窓の帯の上端から下へ m、base = 壁の色
+Facade city_facade(int kind, float u, float down, float rnd, vec3 base, vec3 view_pos, vec3 tangent, vec3 binormal,
+		vec3 normal, float night_k) {
+	Facade f;
+	f.albedo = base;
+	f.rough = 0.85;
+	f.metal = 0.0;
+	f.emission = vec3(0.0);
+	f.ao = 1.0;
+	f.bend = vec2(0.0);
+	if (kind == 1 || kind == 5) {
+		// ガラスのカーテンウォール（1.5 m の縦枠、各階に不透明の帯）
+		float bay = fract(u / 1.5);
+		float flr = fract(down / 3.6);
+		float mull = 1.0 - step(0.04, min(bay, 1.0 - bay) * 1.5);
+		float spandrel = step(0.78, flr);
+		f.albedo = kind == 1 ? mix(vec3(0.05, 0.08, 0.1), vec3(0.06, 0.1, 0.09), rnd) : vec3(0.015, 0.016, 0.02);
+		f.rough = 0.05;
+		if (spandrel > 0.5 || mull > 0.5) {
+			f.albedo = kind == 1 ? vec3(0.7, 0.72, 0.74) : vec3(0.08, 0.08, 0.09);
+			f.rough = 0.4;
+			f.metal = 0.5;
+			f.bend.x = mull > 0.5 ? (bay < 0.5 ? 0.4 : -0.4) : 0.0;
+		} else {
+			vec2 cell = floor(vec2(u / 1.5, down / 3.6));
+			float lit = step(kind == 1 ? 0.45 : 0.8, hash12(vec2(floor(cell.x / 4.0), cell.y) + rnd * 37.0));
+			vec3 office = vec3(0.85, 0.92, 1.0) * (0.7 + 0.3 * hash12(cell + 3.0));
+			f.emission = mix(office * 0.04, office * lit * 1.6, night_k);
+		}
+	} else if (kind == 2) {
+		// 集合住宅：各階のベランダ（床の小口と手すり壁）、奥に窓とカーテン、戸境の壁
+		const float FH = 2.9;
+		float fy = fract(down / FH) * FH;
+		vec2 cell = floor(vec2(u / 5.4, down / FH));
+		float unit_x = fract(u / 5.4) * 5.4;
+		float slab = 1.0 - step(0.18, fy);
+		float rail = step(FH - 1.1, fy) * (1.0 - slab);
+		float wall = 1.0 - step(0.25, min(unit_x, 5.4 - unit_x));
+		f.albedo = base * (0.92 + 0.1 * rnd);
+		if (slab < 0.5 && rail < 0.5 && wall < 0.5) {
+			vec3 curtain = mix(vec3(0.75, 0.7, 0.62), vec3(0.55, 0.62, 0.7), hash12(cell + rnd * 11.0));
+			f.albedo = mix(vec3(0.05, 0.06, 0.07), curtain * 0.6, step(0.6, hash12(cell * 1.3 + 7.0)));
+			f.ao = 0.55;
+			f.rough = 0.2;
+			float lit = step(0.55, hash12(cell + rnd * 91.0));
+			f.emission = mix(curtain * 0.03, curtain * vec3(1.0, 0.82, 0.6) * lit * 1.3, night_k);
+		} else if (rail > 0.5) {
+			f.albedo *= 0.93;
+			f.bend.y = 0.25 * (1.0 - smoothstep(FH - 1.1, FH - 1.0, fy));
+		} else if (slab > 0.5) {
+			f.albedo *= 1.05;
+			f.bend.y = -0.5;
+		}
+	} else {
+		// 0 普通の窓・4 古いビル（くすんだ色と雨の染み、小さめの窓）
+		bool old = kind == 4;
+		if (old) {
+			f.albedo = base * mix(vec3(0.72, 0.7, 0.66), vec3(0.64, 0.66, 0.7), rnd);
+			float streak = hash12(vec2(floor(u / 0.6), rnd * 13.0));
+			f.albedo *= 1.0 - 0.2 * smoothstep(0.5, 1.0, streak) * (1.0 - smoothstep(0.0, 8.0, down));
+		}
+		Window w = old ? city_window(u * 1.15, down * 1.1, rnd + 0.37, view_pos, tangent, binormal, normal, night_k)
+				: city_window(u, down, rnd, view_pos, tangent, binormal, normal, night_k);
+		f.albedo = mix(f.albedo, w.albedo, w.mask);
+		f.rough = mix(f.rough, w.rough, w.mask);
+		f.metal = mix(f.metal, w.metal, w.mask);
+		f.emission = w.emission * (old ? 0.8 : 1.0);
+		f.ao = w.cavity;
+		f.bend = w.nxy;
+	}
+	return f;
+}

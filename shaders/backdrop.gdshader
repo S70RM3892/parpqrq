@@ -55,59 +55,15 @@ void fragment() {
 	float ao = 1.0;
 
 	if (side) {
-		if (kind == 0 && down > 1.0) {
-			// 板状のビル：普通の窓
-			Window w = city_window(u, down - 1.0, rnd, VERTEX, tan_v, bin_v, nrm, night);
-			col = mix(col, w.albedo, w.mask);
-			rough = mix(rough, w.rough, w.mask);
-			metal = mix(metal, w.metal, w.mask);
-			emit += w.emission;
-			ao *= w.cavity;
-		} else if (kind == 1 || kind == 5) {
-			// ガラスのカーテンウォール（1.5 m の縦枠、各階に不透明の帯）。5 = 黒いガラス
-			float bay = fract(u / 1.5);
-			float flr = fract(down / 3.6);
-			float mull = 1.0 - step(0.04, min(bay, 1.0 - bay) * 1.5);
-			float spandrel = step(0.78, flr);
-			vec3 glass = kind == 1 ? mix(vec3(0.05, 0.08, 0.1), vec3(0.06, 0.1, 0.09), rnd) : vec3(0.015, 0.016, 0.02);
-			col = glass;
-			rough = 0.05;
-			metal = 0.0;
-			if (spandrel > 0.5 || mull > 0.5) {
-				col = kind == 1 ? vec3(0.7, 0.72, 0.74) : vec3(0.08, 0.08, 0.09);
-				rough = 0.4;
-				metal = 0.5;
-			} else {
-				vec2 cell = floor(vec2(u / 1.5, down / 3.6));
-				float lit = step(kind == 1 ? 0.45 : 0.8, hash12(vec2(floor(cell.x / 4.0), cell.y) + rnd * 37.0));
-				vec3 office = vec3(0.85, 0.92, 1.0) * (0.7 + 0.3 * hash12(cell + 3.0));
-				emit += mix(office * 0.04, office * lit * 1.6, night);
-			}
-		} else if (kind == 2) {
-			// 集合住宅：各階のベランダ（床の帯と手すり壁）、奥に窓とカーテン
-			float flr_h = 2.9;
-			float fy = fract(down / flr_h) * flr_h;   // 階の上端から
-			vec2 cell = floor(vec2(u / 5.4, down / flr_h));
-			float unit_x = fract(u / 5.4) * 5.4;
-			float slab = 1.0 - step(0.18, fy);                         // ベランダの床の小口
-			float rail = step(flr_h - 1.1, fy) * (1.0 - slab);          // 手すり壁
-			float wall = 1.0 - step(0.25, min(unit_x, 5.4 - unit_x));   // 戸境の壁
-			col = vec3(0.86, 0.85, 0.82) * (0.92 + 0.1 * rnd);
-			if (slab < 0.5 && rail < 0.5 && wall < 0.5) {
-				// 奥の窓（暗い）とカーテン
-				vec3 curtain = mix(vec3(0.75, 0.7, 0.62), vec3(0.55, 0.62, 0.7), hash12(cell + rnd * 11.0));
-				col = mix(vec3(0.05, 0.06, 0.07), curtain * 0.6, step(0.6, hash12(cell * 1.3 + 7.0)));
-				ao = 0.55;
-				rough = 0.2;
-				float lit = step(0.55, hash12(cell + rnd * 91.0));
-				emit += mix(curtain * 0.03, curtain * vec3(1.0, 0.82, 0.6) * lit * 1.3, night);
-			} else if (rail > 0.5) {
-				col *= 0.93;
-				nrm = normalize(nrm + bin_v * 0.25 * (1.0 - smoothstep(flr_h - 1.1, flr_h - 1.0, fy)));
-			} else if (slab > 0.5) {
-				col *= 1.05;
-				nrm = normalize(nrm - bin_v * 0.5);
-			}
+		if ((kind == 0 || kind == 1 || kind == 2 || kind == 4 || kind == 5) && down > 1.0) {
+			// 外壁の種類ごとの窓（city.gdshaderinc の city_facade。コースのビルと同じ）
+			Facade f = city_facade(kind, u, down - 1.0, rnd, col, VERTEX, tan_v, bin_v, nrm, night);
+			col = f.albedo;
+			rough = f.rough;
+			metal = f.metal;
+			emit += f.emission;
+			ao *= f.ao;
+			nrm = normalize(nrm + tan_v * f.bend.x + bin_v * f.bend.y);
 		} else if (kind == 3) {
 			// 細長い雑居ビル：タイル貼り、小さな窓、片側に縦の看板（夜は光る）
 			col = mix(vec3(0.72, 0.62, 0.5), vec3(0.62, 0.6, 0.58), rnd);
@@ -126,16 +82,6 @@ void fragment() {
 				col = mix(vec3(0.95), sc, glyph);
 				emit += mix(vec3(0.95), sc, glyph) * mix(0.15, 2.4, night);
 			}
-		} else if (kind == 4 && down > 1.0) {
-			// 古いビル：くすんだ色、雨の染み、小さめの窓
-			col = mix(vec3(0.62, 0.6, 0.56), vec3(0.55, 0.57, 0.6), rnd);
-			float streak = hash12(vec2(floor(u / 0.6), rnd * 13.0));
-			col *= 1.0 - 0.2 * smoothstep(0.5, 1.0, streak) * (1.0 - smoothstep(0.0, 8.0, down));
-			Window w = city_window(u * 1.15, (down - 1.0) * 1.1, rnd + 0.37, VERTEX, tan_v, bin_v, nrm, night);
-			col = mix(col, w.albedo, w.mask);
-			rough = mix(rough, w.rough, w.mask);
-			emit += w.emission * 0.8;
-			ao *= w.cavity;
 		} else if (kind == 7) {
 			// 屋上の物（塔屋・水槽・室外機）
 			col = mix(vec3(0.8, 0.8, 0.78), vec3(0.62, 0.7, 0.78), step(0.5, fract(rnd * 7.0)));
