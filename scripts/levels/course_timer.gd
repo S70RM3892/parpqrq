@@ -104,6 +104,18 @@ static func create(id: String, medals: PackedFloat32Array, start: Transform3D, g
 	label.add_theme_constant_override(&"outline_size", 8)
 	label.add_theme_font_size_override(&"font_size", 48)
 	hud.add_child(label)
+	# 常時タイマー（設定 run_timer）：右上に小さく
+	var run := Label.new()
+	run.name = "RunTime"
+	run.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	run.offset_left = -260.0
+	run.offset_right = -36.0
+	run.offset_top = 28.0
+	run.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	run.add_theme_color_override(&"font_outline_color", Color(0, 0, 0, 0.6))
+	run.add_theme_constant_override(&"outline_size", 6)
+	run.add_theme_font_size_override(&"font_size", 34)
+	hud.add_child(run)
 	t.add_child(hud)
 	return t
 
@@ -185,6 +197,11 @@ func _bind_player() -> void:
 
 
 func _process(delta: float) -> void:
+	var run := get_node_or_null(^"HUD/RunTime") as Label
+	if run != null:
+		run.visible = Settings.run_timer and (running or elapsed > 0.0)
+		if run.visible:
+			run.text = UITheme.format_time(elapsed)
 	if _shown > 0.0:
 		_shown -= delta
 		if _shown <= 0.0:

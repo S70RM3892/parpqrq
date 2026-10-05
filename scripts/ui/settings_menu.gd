@@ -24,6 +24,7 @@ const ROWS: Array[Array] = [
 	["feel_vibration", "Vibration", "bool"],
 	["", "VISUALS", "header"],
 	["route_color", "Route color (off = expert, marks your medal)", "bool"],
+	["run_timer", "Show run timer", "bool"],
 	["graphics_quality", "Graphics", "quality"],
 	["render_scale", "Render scale", "num", 0.7, 1.0, 0.05],
 	["max_fps", "Frame rate", "fps"],
