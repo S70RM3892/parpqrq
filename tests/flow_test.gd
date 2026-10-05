@@ -72,6 +72,11 @@ func _run() -> void:
 	focused = fo as Button
 	_check("results: Retry focused (%s)" % (str(fo.get_path()) if fo else "none"), focused != null and focused.text.begins_with("Retry"))
 	await _shot("results")
+	# 数え上げ・スタンプの演出の途中に「戻る」を押すと、演出だけ飛ばす（コース選択へは行かない）
+	_check("results: count-up animation running", course.results.is_animating())
+	await _frames(20)
+	await _press(&"ui_cancel")
+	_check("results: cancel skips the animation only", not course.results.is_animating() and course.results.is_open() and get_tree().current_scene == course)
 	await _frames(25)
 	# リプレイ
 	course.results.replay_requested.emit()
@@ -89,6 +94,16 @@ func _run() -> void:
 	await _press(&"retry")
 	await _frames(5)
 	_check("retry from results: back at start, input on", course.player.input_enabled and course.player.global_position.distance_to(course.builder.start_xf.origin) < 0.5)
+	# 演出の途中のリトライは1回で効く（飛ばした上で走り直す）
+	var again := (course.timer.last_result as Dictionary).duplicate()
+	again.time = (again.time as float) + 0.01
+	course.results.show_result(again, true)
+	await _frames(25)
+	_check("results: animation restarts for a new result", course.results.is_animating())
+	await _press(&"retry")
+	await _frames(5)
+	_check("retry during the animation works in one press", not course.results.is_open() and not course.results.is_animating()
+			and course.player.global_position.distance_to(course.builder.start_xf.origin) < 0.5)
 	# 一時停止
 	await _press(&"pause")
 	await _frames(3)

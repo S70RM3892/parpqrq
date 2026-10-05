@@ -13,6 +13,7 @@ var _root: Control
 var _panel: PanelContainer
 var _settings: SettingsMenu
 var _first: Button
+var _dim: ColorRect
 
 
 func _ready() -> void:
@@ -22,10 +23,10 @@ func _ready() -> void:
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.theme = UITheme.get_theme()
 	add_child(_root)
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.35)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_root.add_child(dim)
+	_dim = ColorRect.new()
+	_dim.color = Color(0, 0, 0, 0.35)
+	_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root.add_child(_dim)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.add_child(center)
@@ -39,7 +40,7 @@ func _ready() -> void:
 	v.add_theme_constant_override(&"separation", 14)
 	v.custom_minimum_size.x = 520
 	m.add_child(v)
-	v.add_child(UITheme.label("Paused", 48))
+	v.add_child(UITheme.title_block("Paused", 56))
 	_first = UITheme.button("Retry", func() -> void:
 		close()
 		retry_requested.emit())
@@ -56,6 +57,7 @@ func _ready() -> void:
 	_settings.visible = false
 	_settings.closed.connect(func() -> void:
 		_panel.visible = true
+		UITheme.pop_in(_panel)
 		_first.grab_focus())
 	_root.visible = false
 
@@ -73,6 +75,10 @@ func open() -> void:
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_first.grab_focus.call_deferred()
+	# 暗幕がすっと入り、板がふわっと出る（一時停止中・スロー中も同じ速さ）
+	_dim.modulate.a = 0.0
+	_dim.create_tween().set_ignore_time_scale(true).tween_property(_dim, "modulate:a", 1.0, 0.15)
+	UITheme.pop_in(_panel)
 
 
 func close() -> void:
@@ -85,6 +91,7 @@ func close() -> void:
 func _open_settings() -> void:
 	_panel.visible = false
 	_settings.open()
+	UITheme.pop_in(_settings)
 
 
 func _unhandled_input(event: InputEvent) -> void:

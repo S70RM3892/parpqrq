@@ -9,7 +9,7 @@ const KNEE_OFFSET := Vector3(0.0, -0.3467, -0.0251)
 const ANKLE_OFFSET := Vector3(0.0, -0.4507, 0.0553)
 const SOLE_BELOW_ANKLE := 0.0825
 const HIP_WIDTH := 0.11
-const BODY_BACK := 0.0    ## 脚の前後位置（+で後ろ）。胴体が無いので真下に置く
+const BODY_BACK := -0.06  ## 脚の前後位置（+で後ろ）。少し前に出して、真下を見た時に腰の前が画面の下に入る
 
 @export var player: Player
 
@@ -26,6 +26,23 @@ var _cur: Dictionary[StringName, Vector3] = {&"r": Vector3.ZERO, &"l": Vector3.Z
 func _ready() -> void:
 	top_level = true
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	_add_pelvis()
+
+
+## 腰（下を見ると脚が腰から出ている）。手と同じ白い装甲と黒い関節（FirstPersonHand の部品と材質）
+func _add_pelvis() -> void:
+	var st := FirstPersonHand._begin()
+	FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(0, 0.07, 0.0), Vector3.ZERO), Vector3(0.3, 0.17, 0.2), 0.05, FirstPersonHand.JOINT)
+	FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(0, 0.09, -0.098), Vector3(-6.0, 0, 0)), Vector3(0.22, 0.1, 0.02), 0.008, FirstPersonHand.ARMOR)
+	for sx: float in [-1.0, 1.0]:
+		FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(sx * 0.15, 0.05, 0.0), Vector3(0, 0, sx * 8.0)), Vector3(0.02, 0.12, 0.16), 0.008, FirstPersonHand.ARMOR)
+	FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(0, 0.13, -0.101), Vector3.ZERO), Vector3(0.2, 0.012, 0.012), 0.004, FirstPersonHand.ACCENT)
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/hand.gdshader")
+	mi.material_override = mat
+	add_child(mi)
 
 
 func _process(delta: float) -> void:

@@ -141,7 +141,7 @@ static func bake_emission(mat: int, tint: Color) -> Color:
 			var e := 3.0 * lerpf(0.35, 1.0, night_amount)
 			return Color(tint.r * e, tint.g * e, tint.b * e)
 		Mat.ROUTE:
-			var r := ROUTE_COLOR.srgb_to_linear() * (0.1 * (1.0 + night_amount * 1.2))
+			var r := ROUTE_COLOR.srgb_to_linear() * (0.25 * (1.0 + night_amount * 1.2))  # 壁際の床がオレンジに染まる
 			return Color(r.r, r.g, r.b)
 	return Color(0, 0, 0)
 

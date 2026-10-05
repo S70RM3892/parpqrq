@@ -8,22 +8,42 @@ extends Node
 ## 近道の発見：主ルートの走りでは1本も見つからず、近道の走りでは全部見つかる（完璧な走りも人の模型も）、
 ## 近道の目印：主ルートの走りはシルバー以内なので最初の近道に目印が出る、
 ## チェックポイント：3つ以上、間隔は 150 m 以下で、シルバーのペースで走って 20 秒以下。
-## 終了コード 0 = 全コース合格。各コースのタイムとメダルの目安を出す。--runs は調べる時だけ（絞ると走りの比べる検査を飛ばす）。
+## 近道の段（人の模型の短縮：docs/BALANCE.md）：どの近道も 0.4 s 以上、型ごとの段（段1 0.4〜0.8 / 段2 0.8〜1.6 / 段3 1.6〜3.0 s）に収まり、
+## 1コースの中で一番得な近道は2番目の3倍以下。
+## 技の教え方：近道が要る技は、同じコースの手前か前のコースの主ルートで教えてある（CourseBuilder.SHORTCUT_NEEDS と手ごとの教える技）。
+## 技が主ルートに初めて出る所には床の印がある（3〜6 m 手前）。
+## 近道の型の散らばり：どの型も4コース以下／各エリアに「そのエリアにしか出ない型」が3つ以上／どのコースにも2コース以下にしか出ない型の近道が1本以上／1コース2〜6本。
+## 終了コード 0 = 全コース合格。各コースのタイムとメダルの目安を出す。--runs は調べる時だけ（絞るとメダルの検査を飛ばす。
+## ペア（pm+ps / hm+hs）が揃えば近道の短縮は出す）。--seed=N は人の模型の乱数をずらす（調整の時だけ。メダルの検査は警告になる）。
 ## 記録は "test_<id>" のIDで取る（持ち主の自己ベストを上書きしない）。
 
 const COURSE_SCENE := preload("res://scenes/levels/course.tscn")
 ## 近道1本で縮まる時間の最低（秒）。完璧な走りどうしで比べる
 const MIN_SAVE := 0.25
+## 人の模型で近道1本が縮める時間の最低（秒）と、段ごとの範囲（段1・段2・段3 の [最小, 最大]）。段は CourseBuilder.SHORTCUT_TIER
+const MIN_SAVE_HUMAN := 0.4
+const TIER_RANGE: Array[Vector2] = [Vector2(0.4, 0.8), Vector2(0.8, 1.6), Vector2(1.6, 3.0)]
+## 1コースで一番得な近道は、2番目の何倍まで
+const MAX_SAVE_RATIO := 3.0
 ## チェックポイントの間隔の上限（m）と、シルバーのペースで走った時の上限（秒）
 const MAX_CP_GAP := 150.0
 const MAX_CP_SECONDS := 20.0
 const MIN_CHECKPOINTS := 3
+## 近道の型の散らばり（審査 #5）：1つの型が出るコースの数の上限、エリアごとの「そのエリアにしか出ない型」の数の下限、
+## 「稀な型」（出るコースがこの数以下）を各コースが1本は持つ、1コースの近道の本数
+const MAX_TYPE_COURSES := 4
+const MIN_AREA_TYPES := 3
+const RARE_TYPE_COURSES := 2
+const MIN_SHORTCUTS := 2
+const MAX_SHORTCUTS := 6
 ## 人の模型の乱数の種（コースの並び順を足す）
 const HUMAN_SEED := 20261004
 const ALL_RUNS: PackedStringArray = ["pm", "ps", "hm", "hs"]
 
 var _failed: int = 0
 var _runs: PackedStringArray = ALL_RUNS
+## 人の模型の乱数のずらし（--seed=N。調整の時だけ）
+var _seed_offset: int = 0
 ## 一部のコースだけ走った時（--only）は、Jolt の履歴の違いで数フレームずれるので、メダルの食い違いは警告だけにする
 var _partial: bool = false
 ## 人の模型の Perfect の種類ごとの数（表の後ろに出す）
@@ -32,21 +52,25 @@ var _human_kinds: Dictionary = {}
 
 func _ready() -> void:
 	Settings.hitstop_slowmo = false
-	var only := ""
+	var only: PackedStringArray = []
 	for a: String in OS.get_cmdline_user_args():
 		if a.begins_with("--only="):
-			only = a.trim_prefix("--only=")
+			only = a.trim_prefix("--only=").split(",", false)
 			_partial = true
 		elif a.begins_with("--runs="):
 			_runs = a.trim_prefix("--runs=").split(",")
 			_partial = true
+		elif a.begins_with("--seed="):
+			_seed_offset = a.trim_prefix("--seed=").to_int()
+			_partial = true
 	await _check_hint_rule()
+	_check_teaching(only)
 	var results: Array[String] = []
 	var weak: PackedStringArray = []
 	var soft: PackedStringArray = []
 	for i: int in CourseCatalog.COURSES.size():
 		var c: Dictionary = CourseCatalog.COURSES[i]
-		if only != "" and c.id != only:
+		if not only.is_empty() and c.id not in only:
 			continue
 		var r := await _run_course(c, i)
 		results.append(r.text)
@@ -66,6 +90,123 @@ func _ready() -> void:
 		print("human perfects by kind: %s" % ", ".join(kinds))
 	print("COURSE TEST: %s" % ("PASS" if _failed == 0 else "FAIL (%d)" % _failed))
 	Audio.quit_game(1 if _failed > 0 else 0)
+
+
+## 技の教え方（docs/BALANCE.md）：カタログの順に全コースを組み立てて（走らずに）、主ルートの手が教える技と近道が要る技を突き合わせる。
+## - 技が主ルートに初めて出る所には床の印がある（印は初めての所だけ。ボタンの印は障害物の 3〜6 m 手前、印の後ろに床が 6 m 以上ある）
+## - 近道が要る技（CourseBuilder.SHORTCUT_NEEDS）は、前のコースか、同じコースの手前の主ルートで教えてある
+## - エリア1（朝の屋上）の近道は走り・ジャンプ・ヴォルト・ローリングだけで通れる
+## - 近道の型には要る技と段が決めてある
+func _check_teaching(only: PackedStringArray) -> void:
+	var seen: Dictionary = {}     # 技 → 初めて教えるコース
+	var first_step: Dictionary = {}
+	var types_by_course: Dictionary = {}   # コースの id → 近道の型の並び
+	var lines: PackedStringArray = []
+	for c: Dictionary in CourseCatalog.COURSES:
+		var geo := LevelGeometry.new()
+		var b := CourseBuilder.new(geo, CourseCatalog.area_of(c.id), int(c.seed))
+		b.build(CourseCatalog.recipe(c.id))
+		var checking: bool = only.is_empty() or c.id in only
+		var before: Dictionary = seen.duplicate()
+		var kinds: Array[String] = []
+		for sc: Dictionary in b.shortcuts:
+			kinds.append(str(sc.type))
+		types_by_course[c.id] = kinds
+		for t: Dictionary in b.taught:
+			var move: String = t.move
+			if not seen.has(move):
+				seen[move] = c.id
+				first_step[move] = "%s @%.0f m" % [c.id, t.dist]
+				if checking and not t.marked:
+					_failed += 1
+					print("FAIL %s: the first main-route %s (at %.0f m) has no floor mark" % [c.id, move, t.dist])
+			elif t.marked and checking:
+				_failed += 1
+				print("FAIL %s: %s is marked again at %.0f m (marks are for the first main-route occurrence only)" % [c.id, move, t.dist])
+		for m: Dictionary in b.marks:
+			if checking and (float(m.glyph) < 3.0 or float(m.glyph) > 6.0 or float(m.floor_back) < 6.0):
+				_failed += 1
+				print("FAIL %s: floor mark of %s is %.1f m before the obstacle with %.1f m of floor behind (want 3-6 m, >= 6 m)" % [c.id, m.move, m.glyph, m.floor_back])
+		for sc: Dictionary in b.shortcuts:
+			if not checking:
+				continue
+			if not CourseBuilder.SHORTCUT_NEEDS.has(sc.type) or not CourseBuilder.SHORTCUT_TIER.has(sc.type):
+				_failed += 1
+				print("FAIL %s: shortcut type %s has no needs or tier" % [c.id, sc.type])
+				continue
+			var from_dist: float = b.nodes[int(sc.from)].dist
+			for need: String in sc.needs:
+				var ok := before.has(need)
+				for t: Dictionary in b.taught:
+					if t.move == need and float(t.dist) <= from_dist + 0.01:
+						ok = true
+				if not ok:
+					_failed += 1
+					print("FAIL %s: shortcut %s needs %s, which no main route teaches at or before it" % [c.id, sc.name, need])
+				if int(c.area) == 0 and not need in ["jump", "vault", "roll"]:
+					_failed += 1
+					print("FAIL %s: area 1 shortcut %s needs %s (only jump / vault / roll)" % [c.id, sc.name, need])
+		geo.free()
+	for move: String in CourseBuilder.MOVES:
+		lines.append("%s %s" % [move, first_step.get(move, "NOT TAUGHT")])
+		if not first_step.has(move) and only.is_empty():
+			_failed += 1
+			print("FAIL: move %s is never taught on a main route" % move)
+	print("first main-route occurrence of each move (every one has a floor mark): " + ", ".join(lines))
+	_check_variety(types_by_course)
+
+
+## 近道の型の散らばり（審査 #5）。走らずにレシピだけで調べる：
+## (a) どの型も MAX_TYPE_COURSES コース以下にしか出ない
+## (b) 各エリアに、そのエリアのコースにしか出ない型が MIN_AREA_TYPES 以上ある
+## (c) どのコースにも、RARE_TYPE_COURSES コース以下にしか出ない型の近道が1本以上ある
+## (d) 1コースの近道は MIN_SHORTCUTS〜MAX_SHORTCUTS 本
+func _check_variety(types_by_course: Dictionary) -> void:
+	var courses_of: Dictionary = {}   # 型 → 出るコースの id
+	var areas_of: Dictionary = {}     # 型 → 出るエリア（Dictionary を集合として使う）
+	for c: Dictionary in CourseCatalog.COURSES:
+		for kind: String in types_by_course[c.id]:
+			var ids: Array = courses_of.get(kind, [])
+			if not ids.has(c.id):
+				ids.append(c.id)
+			courses_of[kind] = ids
+			var areas: Dictionary = areas_of.get(kind, {})
+			areas[int(c.area)] = true
+			areas_of[kind] = areas
+	var names: Array = courses_of.keys()
+	names.sort()
+	var counts: PackedStringArray = []
+	for kind: String in names:
+		var n := (courses_of[kind] as Array).size()
+		counts.append("%s %d" % [kind, n])
+		if n > MAX_TYPE_COURSES:
+			_failed += 1
+			print("FAIL variety: shortcut type %s appears in %d courses (max %d): %s" % [kind, n, MAX_TYPE_COURSES, ", ".join(courses_of[kind])])
+	print("shortcut types (courses each): " + ", ".join(counts))
+	var per_area: PackedStringArray = []
+	for area: int in CourseCatalog.AREAS.size() - 1:
+		var only_here: PackedStringArray = []
+		for kind: String in names:
+			var areas: Dictionary = areas_of[kind]
+			if areas.size() == 1 and areas.has(area):
+				only_here.append(kind)
+		per_area.append("area %d: %s" % [area + 1, ", ".join(only_here)])
+		if only_here.size() < MIN_AREA_TYPES:
+			_failed += 1
+			print("FAIL variety: area %d has only %d shortcut types of its own (want >= %d): %s" % [area + 1, only_here.size(), MIN_AREA_TYPES, ", ".join(only_here)])
+	print("types only in one area: " + " / ".join(per_area))
+	for c: Dictionary in CourseCatalog.COURSES:
+		var kinds: Array = types_by_course[c.id]
+		var rare: PackedStringArray = []
+		for kind: String in kinds:
+			if (courses_of[kind] as Array).size() <= RARE_TYPE_COURSES and not rare.has(kind):
+				rare.append(kind)
+		if rare.is_empty():
+			_failed += 1
+			print("FAIL variety: %s has no shortcut of a rare type (one that appears in <= %d courses): %s" % [c.id, RARE_TYPE_COURSES, ", ".join(kinds)])
+		if kinds.size() < MIN_SHORTCUTS or kinds.size() > MAX_SHORTCUTS:
+			_failed += 1
+			print("FAIL variety: %s has %d shortcuts (want %d to %d)" % [c.id, kinds.size(), MIN_SHORTCUTS, MAX_SHORTCUTS])
 
 
 ## 目印を出す条件：自己ベストがシルバー以内、または同じコースを5回ゴールした
@@ -101,10 +242,11 @@ func _check_hint_rule() -> void:
 func _run_course(c: Dictionary, index: int) -> Dictionary:
 	var runs: Dictionary = {}
 	for mode: String in _runs:
-		runs[mode] = await _run_once(c, mode.ends_with("s"), mode.begins_with("h"), HUMAN_SEED + index)
+		runs[mode] = await _run_once(c, mode.ends_with("s"), mode.begins_with("h"), HUMAN_SEED + index + _seed_offset)
 	var ok := true
 	for mode: String in runs:
 		ok = ok and runs[mode].ok
+	var runs_ok := ok
 	var full := _runs.size() == ALL_RUNS.size()
 	var pm: Dictionary = runs.get("pm", {})
 	var ps: Dictionary = runs.get("ps", {})
@@ -123,13 +265,17 @@ func _run_course(c: Dictionary, index: int) -> Dictionary:
 	var saves_h := ""
 	var sug := {"medals": [], "weak": false}
 	var soft := false
-	if full:
-		# 近道ごとに縮んだ時間：分かれる道しるべ → 戻る道しるべ までの時間を2つの走りで比べる。完璧な走りは MIN_SAVE 以上、人は表示だけ
-		var s1 := _saves(c, pm, ps, ok, MIN_SAVE)
-		var s2 := _saves(c, hm, hs, ok, -INF)
+	# 近道ごとに縮んだ時間：分かれる道しるべ → 戻る道しるべ までの時間を2つの走りで比べる。完璧な走りは MIN_SAVE 以上、
+	# 人は MIN_SAVE_HUMAN 以上・型の段に収まる・一番得な近道が2番目の3倍以下
+	if runs.has("pm") and runs.has("ps"):
+		var s1 := _saves(c, pm, ps, runs_ok, MIN_SAVE)
 		saves = s1.text
+		ok = ok and s1.ok
+	if runs.has("hm") and runs.has("hs"):
+		var s2 := _saves(c, hm, hs, runs_ok, MIN_SAVE_HUMAN, true)
 		saves_h = s2.text
-		ok = ok and s1.ok and s2.ok
+		ok = ok and s2.ok
+	if full:
 		# 発見の判定の箱が近道の上だけにあるか（主ルートの走りは1本も見つからず、近道の走りは全部見つかる）
 		for pair: Array in [["perfect", pm, ps], ["human", hm, hs]]:
 			var main_run: Dictionary = pair[1]
@@ -170,8 +316,10 @@ func _run_course(c: Dictionary, index: int) -> Dictionary:
 			"ok  " if ok else "FAIL", c.id, c.name, _t(pm), _t(ps), _t(hm), _t(hs), _n(pm, "perfect"), _n(ps, "perfect"), _n(hm, "perfect"),
 			_n(hs, "perfect"), _n(pm, "crash"), _n(ps, "crash"), _n(hm, "crash"), _n(hs, "crash"), any.goal_dist, any.cp_count, gap, gap_s,
 			_fmt(sug.medals) if full else "-", any.build_ms]
-	if full:
-		text += "\n       perfect saves: %s\n       human saves:   %s" % [saves if saves != "" else "(no shortcuts)", saves_h if saves_h != "" else "(no shortcuts)"]
+	if runs.has("pm") and runs.has("ps"):
+		text += "\n       perfect saves: %s" % (saves if saves != "" else "(no shortcuts)")
+	if runs.has("hm") and runs.has("hs"):
+		text += "\n       human saves:   %s" % (saves_h if saves_h != "" else "(no shortcuts)")
 	return {"text": text, "weak": sug.weak, "soft": soft}
 
 
@@ -183,21 +331,41 @@ func _n(r: Dictionary, key: String) -> int:
 	return int(r.get(key, 0))
 
 
-## 近道ごとの短縮の表示 {text: "名前 -0.57, ...", ok: min_save を下回る近道が無い}。下回ればここで失敗に数える
-func _saves(c: Dictionary, main: Dictionary, short: Dictionary, ok: bool, min_save: float) -> Dictionary:
+## 近道ごとの短縮の表示 {text: "名前 +0.57, ...", ok}。短縮 = 主ルートの走りの時間 − 近道の走りの時間（正 = 近道が速い）。
+## min_save を下回る近道があれば失敗に数える。tiers = true なら（人の模型）型ごとの段と、一番得な近道が2番目の3倍以下も調べる
+func _saves(c: Dictionary, main: Dictionary, short: Dictionary, run_ok: bool, min_save: float, tiers: bool = false) -> Dictionary:
 	var out: PackedStringArray = []
 	var good := true
+	var all: Array[float] = []
 	for sc: Dictionary in main.shortcuts:
 		var a: float = sc.from_dist
 		var b: float = sc.to_dist
 		var tm := _span(main.passed, a, b)
 		var tsc := _span(short.passed, a, b)
 		var save := tm - tsc
-		out.append("%s %+.2f" % [sc.name, -save])
-		if ok and good and not (save >= min_save):
+		var tier := int(CourseBuilder.SHORTCUT_TIER.get(str(sc.type), 0))
+		out.append("%s %+.2f%s" % [sc.name, save, " (T%d)" % tier if tiers else ""])
+		all.append(save)
+		if not run_ok:
+			continue
+		if not (save >= min_save):
 			_failed += 1
 			good = false
-			print("FAIL %s: shortcut %s is not faster (main %.2f s, shortcut %.2f s)" % [c.id, sc.name, tm, tsc])
+			print("FAIL %s: shortcut %s does not save enough (main %.2f s, shortcut %.2f s, saves %.2f s, want >= %.2f)" % [c.id, sc.name, tm, tsc, save, min_save])
+		elif tiers:
+			var r := TIER_RANGE[tier - 1]
+			if save < r.x or save > r.y:
+				_failed += 1
+				good = false
+				print("FAIL %s: shortcut %s (tier %d) saves %.2f s for humans, want %.1f to %.1f s" % [c.id, sc.name, tier, save, r.x, r.y])
+	if tiers and run_ok and all.size() >= 2:
+		all.sort()
+		var top := all[-1]
+		var second := all[-2]
+		if top > second * MAX_SAVE_RATIO:
+			_failed += 1
+			good = false
+			print("FAIL %s: the best shortcut saves %.2f s for humans, more than %.0f x the second best (%.2f s)" % [c.id, top, MAX_SAVE_RATIO, second])
 	return {"text": ", ".join(out), "ok": good}
 
 
@@ -238,9 +406,14 @@ func _run_once(c: Dictionary, take_shortcuts: bool, human: bool, seed_value: int
 	var tn := OS.get_environment("TRACE_NODES").split("-")
 	var trace_mode := OS.get_environment("TRACE_MODE")  # main / short（空なら両方）
 	var tracing := tn.size() == 2 and (trace_mode == "" or (trace_mode == "short") == take_shortcuts)
+	var last_state := -1
+	var states := OS.get_environment("COURSE_STATES") != ""
 	while frames < limit:
 		await get_tree().physics_frame
 		frames += 1
+		if states and p.state != last_state and (trace_mode == "" or (trace_mode == "short") == take_shortcuts):
+			last_state = p.state
+			print("  s f%d t %.2f %s pos (%.1f, %.1f, %.1f) v %.1f node %d" % [frames, frames / 60.0, Player.State.find_key(p.state), p.global_position.x, p.global_position.y, p.global_position.z, p.horizontal_speed(), bot.idx])
 		if tracing and bot.idx >= tn[0].to_int() and bot.idx <= tn[1].to_int():
 			print("  f%d pos (%.2f, %.2f, %.2f) st %d t %.2f v (%.2f, %.2f, %.2f) node %d" % [frames, p.global_position.x, p.global_position.y, p.global_position.z, p.state, p.state_time, p.velocity.x, p.velocity.y, p.velocity.z, bot.idx])
 		if not course.timer.last_result.is_empty() or bot.stuck or bot.falls > 0:
@@ -265,7 +438,7 @@ func _run_once(c: Dictionary, take_shortcuts: bool, human: bool, seed_value: int
 		print("FAIL %s: finish count should be 1 after one goal (got %d)" % [label, CourseTimer.finish_count("test_" + c.id)])
 	var shortcuts: Array[Dictionary] = []
 	for sc: Dictionary in course.builder.shortcuts:
-		shortcuts.append({"name": sc.name, "from_dist": float(course.builder.nodes[int(sc.from)].dist),
+		shortcuts.append({"name": sc.name, "type": sc.type, "from_dist": float(course.builder.nodes[int(sc.from)].dist),
 				"to_dist": float(course.builder.nodes[int(sc.to)].dist)})
 	var out := {"ok": ok, "time": float(res.get("time", -1.0)), "passed": bot.passed, "crash": counts.crash,
 			"perfect": counts.perfect, "route_len": course.builder.route_len, "build_ms": course.build_ms,

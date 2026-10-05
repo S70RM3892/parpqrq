@@ -36,6 +36,8 @@ var graphics_quality: int = 1
 # 見た目
 ## ルートカラー（使える足場・壁・縁のオレンジ）。上級者向けにOFFにできる。OFFでクリアするとメダルに印が付く
 var route_color: bool = true
+## 走っている間ずっとタイムを右上に出す（既定はOFF：走行中は文字を出さない方針。タイムアタックしたい人向け）
+var run_timer: bool = false
 
 # 音量 0.0〜1.0
 var volume_master: float = 1.0
@@ -50,7 +52,7 @@ const _KEYS: PackedStringArray = [
 	"speed_fov_strength", "head_bob_strength", "screen_shake_strength",
 	"camera_tilt_strength", "speed_lines_strength", "center_dot", "hitstop_slowmo",
 	"feel_camera", "feel_body", "feel_impact", "feel_vibration",
-	"max_fps", "render_scale", "graphics_quality", "route_color",
+	"max_fps", "render_scale", "graphics_quality", "route_color", "run_timer",
 	"volume_master", "volume_music", "volume_sfx", "first_run_done",
 ]
 
