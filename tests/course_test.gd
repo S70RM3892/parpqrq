@@ -12,6 +12,7 @@ extends Node
 ## 1コースの中で一番得な近道は2番目の3倍以下。
 ## 技の教え方：近道が要る技は、同じコースの手前か前のコースの主ルートで教えてある（CourseBuilder.SHORTCUT_NEEDS と手ごとの教える技）。
 ## 技が主ルートに初めて出る所には床の印がある（3〜6 m 手前）。
+## 近道の型の散らばり：どの型も4コース以下／各エリアに「そのエリアにしか出ない型」が3つ以上／どのコースにも2コース以下にしか出ない型の近道が1本以上／1コース2〜6本。
 ## 終了コード 0 = 全コース合格。各コースのタイムとメダルの目安を出す。--runs は調べる時だけ（絞るとメダルの検査を飛ばす。
 ## ペア（pm+ps / hm+hs）が揃えば近道の短縮は出す）。--seed=N は人の模型の乱数をずらす（調整の時だけ。メダルの検査は警告になる）。
 ## 記録は "test_<id>" のIDで取る（持ち主の自己ベストを上書きしない）。
@@ -28,6 +29,13 @@ const MAX_SAVE_RATIO := 3.0
 const MAX_CP_GAP := 150.0
 const MAX_CP_SECONDS := 20.0
 const MIN_CHECKPOINTS := 3
+## 近道の型の散らばり（審査 #5）：1つの型が出るコースの数の上限、エリアごとの「そのエリアにしか出ない型」の数の下限、
+## 「稀な型」（出るコースがこの数以下）を各コースが1本は持つ、1コースの近道の本数
+const MAX_TYPE_COURSES := 4
+const MIN_AREA_TYPES := 3
+const RARE_TYPE_COURSES := 2
+const MIN_SHORTCUTS := 2
+const MAX_SHORTCUTS := 6
 ## 人の模型の乱数の種（コースの並び順を足す）
 const HUMAN_SEED := 20261004
 const ALL_RUNS: PackedStringArray = ["pm", "ps", "hm", "hs"]
@@ -92,6 +100,7 @@ func _ready() -> void:
 func _check_teaching(only: PackedStringArray) -> void:
 	var seen: Dictionary = {}     # 技 → 初めて教えるコース
 	var first_step: Dictionary = {}
+	var types_by_course: Dictionary = {}   # コースの id → 近道の型の並び
 	var lines: PackedStringArray = []
 	for c: Dictionary in CourseCatalog.COURSES:
 		var geo := LevelGeometry.new()
@@ -99,6 +108,10 @@ func _check_teaching(only: PackedStringArray) -> void:
 		b.build(CourseCatalog.recipe(c.id))
 		var checking: bool = only.is_empty() or c.id in only
 		var before: Dictionary = seen.duplicate()
+		var kinds: Array[String] = []
+		for sc: Dictionary in b.shortcuts:
+			kinds.append(str(sc.type))
+		types_by_course[c.id] = kinds
 		for t: Dictionary in b.taught:
 			var move: String = t.move
 			if not seen.has(move):
@@ -140,6 +153,60 @@ func _check_teaching(only: PackedStringArray) -> void:
 			_failed += 1
 			print("FAIL: move %s is never taught on a main route" % move)
 	print("first main-route occurrence of each move (every one has a floor mark): " + ", ".join(lines))
+	_check_variety(types_by_course)
+
+
+## 近道の型の散らばり（審査 #5）。走らずにレシピだけで調べる：
+## (a) どの型も MAX_TYPE_COURSES コース以下にしか出ない
+## (b) 各エリアに、そのエリアのコースにしか出ない型が MIN_AREA_TYPES 以上ある
+## (c) どのコースにも、RARE_TYPE_COURSES コース以下にしか出ない型の近道が1本以上ある
+## (d) 1コースの近道は MIN_SHORTCUTS〜MAX_SHORTCUTS 本
+func _check_variety(types_by_course: Dictionary) -> void:
+	var courses_of: Dictionary = {}   # 型 → 出るコースの id
+	var areas_of: Dictionary = {}     # 型 → 出るエリア（Dictionary を集合として使う）
+	for c: Dictionary in CourseCatalog.COURSES:
+		for kind: String in types_by_course[c.id]:
+			var ids: Array = courses_of.get(kind, [])
+			if not ids.has(c.id):
+				ids.append(c.id)
+			courses_of[kind] = ids
+			var areas: Dictionary = areas_of.get(kind, {})
+			areas[int(c.area)] = true
+			areas_of[kind] = areas
+	var names: Array = courses_of.keys()
+	names.sort()
+	var counts: PackedStringArray = []
+	for kind: String in names:
+		var n := (courses_of[kind] as Array).size()
+		counts.append("%s %d" % [kind, n])
+		if n > MAX_TYPE_COURSES:
+			_failed += 1
+			print("FAIL variety: shortcut type %s appears in %d courses (max %d): %s" % [kind, n, MAX_TYPE_COURSES, ", ".join(courses_of[kind])])
+	print("shortcut types (courses each): " + ", ".join(counts))
+	var per_area: PackedStringArray = []
+	for area: int in CourseCatalog.AREAS.size() - 1:
+		var only_here: PackedStringArray = []
+		for kind: String in names:
+			var areas: Dictionary = areas_of[kind]
+			if areas.size() == 1 and areas.has(area):
+				only_here.append(kind)
+		per_area.append("area %d: %s" % [area + 1, ", ".join(only_here)])
+		if only_here.size() < MIN_AREA_TYPES:
+			_failed += 1
+			print("FAIL variety: area %d has only %d shortcut types of its own (want >= %d): %s" % [area + 1, only_here.size(), MIN_AREA_TYPES, ", ".join(only_here)])
+	print("types only in one area: " + " / ".join(per_area))
+	for c: Dictionary in CourseCatalog.COURSES:
+		var kinds: Array = types_by_course[c.id]
+		var rare: PackedStringArray = []
+		for kind: String in kinds:
+			if (courses_of[kind] as Array).size() <= RARE_TYPE_COURSES and not rare.has(kind):
+				rare.append(kind)
+		if rare.is_empty():
+			_failed += 1
+			print("FAIL variety: %s has no shortcut of a rare type (one that appears in <= %d courses): %s" % [c.id, RARE_TYPE_COURSES, ", ".join(kinds)])
+		if kinds.size() < MIN_SHORTCUTS or kinds.size() > MAX_SHORTCUTS:
+			_failed += 1
+			print("FAIL variety: %s has %d shortcuts (want %d to %d)" % [c.id, kinds.size(), MIN_SHORTCUTS, MAX_SHORTCUTS])
 
 
 ## 目印を出す条件：自己ベストがシルバー以内、または同じコースを5回ゴールした

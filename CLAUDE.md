@@ -24,7 +24,7 @@
 - `scenes/ui/tuning_panel.tscn` — 数値の調整パネル（F1 / R3）
 - `scripts/ui/flow_hud.gd` + `shaders/flow_edge.gdshader` — 勢い値（画面の縁の光）とPerfect表示・スロー
 - `scripts/levels/greybox.gd` — 白箱テストコース（配列で定義、開発用）、`course_timer.gd` — 計測・区間タイム・メダル・記録（`run_recording.gd`）、`checkpoint.gd` — 落下時の戻り先
-- `scripts/levels/course_catalog.gd` — 16コース＋フリーランの一覧（型の並び→レシピ）とメダル5段（開発者・エース・ゴールド・シルバー・ブロンズ）、`course_builder.gd` — レシピから屋上を組み立てる（書き方は先頭。隠れた近道のある区間 `detour` / `swinggap` / `zipjog` / `kickwall` は主ルートの道しるべと近道の道しるべを両方作る）、`course_props.gd` — 屋上の小物、`course.gd` + `scenes/levels/course.tscn` — 1本のコース（一時停止・結果・リプレイもここ）
+- `scripts/levels/course_catalog.gd` — 16コース＋フリーランの一覧（型の並び→レシピ）とメダル5段（開発者・エース・ゴールド・シルバー・ブロンズ）、`course_builder.gd` — レシピから屋上を組み立てる（書き方は先頭。隠れた近道のある区間 `detour` / `swinggap` / `zipjog` / `kickwall` / `stairdrop` / `vaultcut` / `canopyslide` / `craneswing` / `scaffoldclimb` / `billboardkick` / `chimney` / `trainroof` は主ルートの道しるべと近道の道しるべを両方作る。近道の型はエリアごとに散らす：どの型も4コース以下、各エリアに「そのエリアにしか出ない型」3つ以上、どのコースにも2コース以下にしか出ない型を1本以上（course_test が調べる。docs/BALANCE.md）。新しい型は `SHORTCUT_STEPS` / `SHORTCUT_NEEDS` / `SHORTCUT_TIER` に足す）、`course_props.gd` — 屋上の小物、`course.gd` + `scenes/levels/course.tscn` — 1本のコース（一時停止・結果・リプレイもここ）
 - `scripts/levels/level_geometry.gd` — 箱・円柱を材質×区画ごとに1メッシュへまとめる、`level_style.gd` + `shaders/level.gdshader` — 街の材質とルートカラー、`atmosphere.gd` — 時間帯（空・太陽・霧）、`backdrop.gd` — 遠景
 - `scripts/autoload/game.gd` — タイトル↔コースの流れと記録の読み出し、`audio.gd` — BGM（勢い値で3層）とメニューの音、`scripts/player/player_audio.gd` — プレイヤーの音
 - `scripts/ui/` — `title.gd`（タイトル・コース選択・操作説明・初回の酔い対策）、`settings_menu.gd`、`pause_menu.gd`、`results_panel.gd`、`replay_viewer.gd`、`ui_theme.gd`
