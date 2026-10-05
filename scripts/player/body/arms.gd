@@ -123,8 +123,10 @@ func _pose(side: float, p: Player) -> Transform3D:
 		Player.State.CLIMB:
 			# 両手で縁を掴み、体が上がりきるまで離さない
 			xf = xf.interpolate_with(_plant(side, p.move), smoothstep(0.0, 0.1, u) * (1.0 - smoothstep(0.7, 0.95, u)))
-		Player.State.LEDGE_HANG, Player.State.SWING, Player.State.ZIPLINE:
-			xf = _plant(side, p.move)  # 両手で縁・バー・線を握る
+		Player.State.LEDGE_HANG:
+			xf = _plant(side, p.move)  # 両手で縁を掴む
+		Player.State.SWING, Player.State.ZIPLINE:
+			xf = _hang(side, p.move)  # 両手でバー・線を下から握る
 	return xf
 
 
@@ -160,6 +162,23 @@ func _arm(side: float, theta_deg: float) -> Transform3D:
 
 
 ## 手のひらを上面の point に、指先を越える向きに合わせた姿勢（カメラ基準）
+## スイング・ジップライン：バー・線を下から握る。前腕は肩から握る所へ伸び、手のひらは前を向く。
+## 右手はカメラの右（線が前へ延びるジップラインでは前）に来る
+func _hang(side: float, v: VaultProbe.Result) -> Transform3D:
+	var cam := get_parent() as Node3D
+	var along := v.dir.cross(Vector3.UP).normalized()
+	var fwd := -cam.global_basis.z
+	fwd = Vector3(fwd.x, 0.0, fwd.z).normalized()
+	var s := 1.0 if along.dot(cam.global_basis.x * side + fwd * side * 0.3) >= 0.0 else -1.0
+	var grip := v.hand + along * s * PLANT_SPREAD
+	var shoulder := cam.global_position + cam.global_basis.x * side * 0.2 + Vector3.DOWN * 0.3
+	var reach := (grip - shoulder).normalized()
+	var inv := cam.global_transform.affine_inverse()
+	var b := (inv.basis * Basis.looking_at(reach, -fwd)).orthonormalized()
+	var local_target := inv * (grip - fwd * 0.03 + Vector3.DOWN * 0.035)
+	return Transform3D(b, local_target - b * _palm)
+
+
 func _plant(side: float, v: VaultProbe.Result) -> Transform3D:
 	var cam := get_parent() as Node3D
 	var lateral := v.dir.cross(Vector3.UP).normalized()

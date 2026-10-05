@@ -32,7 +32,7 @@ shoot a1_1-1_up --course=1-1 --at=8 --pitch=25
 shoot free --course=free_run --at=2.5 --pitch=-10
 # 技の最中の手（状態に入ってから数フレーム後）
 shoot hand_vault --course=1-1 --when=VAULT --delay=6
-shoot hand_ledge --course=2-1 --when=LEDGE_HANG --delay=2
+shoot hand_climb --course=2-1 --when=CLIMB --delay=4
 shoot hand_swing --course=2-1 --when=SWING --delay=6
 shoot hand_zip --course=2-3 --when=ZIPLINE --delay=40
 shoot hand_wallrun --course=3-1 --when=WALL_RUN --delay=15
