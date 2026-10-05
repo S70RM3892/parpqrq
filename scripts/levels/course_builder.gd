@@ -26,9 +26,13 @@ extends RefCounted
 ##   width 6           これからの屋上の幅
 ##   floor gravel      これからの屋上の床（concrete / gravel / metal / glass）
 ##   cp                チェックポイント
-## 区間（4つ）とチェックポイント（指定が無ければ3つ）はルートの長さで均等に置く。
+## 区間（4つ）はルートの長さで均等に置く。チェックポイントは cp の指定を守り、間隔が CP_MAX_GAP を超える所に足して
+## 均等に置く（3つ以上。シルバーのペースで走って20秒以下になる長さ）。
 
 const STREET_Y := -45.0
+## チェックポイントの間隔の上限（m）と最低の数（スタート→cp→…→ゴールのルート距離で測る）
+const CP_MAX_GAP := 150.0
+const CP_MIN := 3
 ## 隠れた近道を1本作るレシピの手（CourseCatalog.shortcut_count もこれで数える）
 const SHORTCUT_STEPS: PackedStringArray = ["detour", "swinggap", "zipjog", "kickwall"]
 const LANE := 4.0
@@ -63,6 +67,9 @@ var min_floor_y: float = 0.0
 var start_xf: Transform3D
 var goal_xf: Transform3D
 var checkpoints: Array[Transform3D] = []
+## チェックポイントごとのルート距離（checkpoints と同じ並び）と、ゴールのルート距離
+var checkpoint_dists: Array[float] = []
+var goal_dist: float = 0.0
 var splits: Array[Transform3D] = []
 var route_points: PackedVector3Array = []
 ## 隠れた近道（色を付けない）。{name, from: 主ルートの道しるべの番号（ここから分かれる）,
@@ -122,6 +129,7 @@ func build(recipe: PackedStringArray) -> void:
 	# ゴール：少し走った先に門
 	_walk(8.0)
 	goal_xf = Transform3D(Basis(Vector3.UP, yaw), pos)
+	goal_dist = route_len
 	CourseProps.goal_gate(geo, goal_xf, LANE + 1.0)
 	_walk(10.0)
 	_close_floor(0.0, 22.0)
@@ -833,11 +841,105 @@ func _place_markers() -> void:
 	for i: int in 4:
 		var at := total * (i + 1) / 5.0
 		splits.append(_safe_after(at))
-	var cps := _cp_requests.duplicate()
-	if cps.is_empty():
-		cps = [total * 0.25, total * 0.5, total * 0.75]
-	for d: float in cps:
-		checkpoints.append(_safe_after(d))
+	checkpoint_dists = _spread_checkpoints()
+	for d: float in checkpoint_dists:
+		checkpoints.append(_safe_after(d - 0.001))
+
+
+## チェックポイントのルート距離（立てる所 safe の距離）。cp の指定を残し、間隔が CP_MAX_GAP を超える所を均等に埋め、CP_MIN に足りなければ一番長い間隔を割る
+func _spread_checkpoints() -> Array[float]:
+	var end := goal_dist if goal_dist > 0.0 else route_len
+	var out: Array[float] = []
+	for d: float in _cp_requests:
+		var s := _safe_dist_after(d)
+		if s > 0.0 and s < end and not out.has(s):
+			out.append(s)
+	out.sort()
+	var edges: Array[float] = [0.0]
+	edges.append_array(out)
+	edges.append(end)
+	# 指定が無ければ、全体を均等に割る（最低 CP_MIN 個）
+	var at_least := CP_MIN if out.is_empty() else 0
+	out.clear()
+	for i: int in edges.size() - 1:
+		out.append_array(_fill_gap(edges[i], edges[i + 1], at_least))
+		if i + 1 < edges.size() - 1:
+			out.append(edges[i + 1])
+	# 数が足りなければ、一番長い間隔を割る
+	while out.size() < CP_MIN:
+		var chain: Array[float] = [0.0]
+		chain.append_array(out)
+		chain.append(end)
+		var wide := 0
+		for i: int in chain.size() - 1:
+			if chain[i + 1] - chain[i] > chain[wide + 1] - chain[wide]:
+				wide = i
+		var mid := _nearest_safe(chain[wide], chain[wide + 1], (chain[wide] + chain[wide + 1]) * 0.5)
+		if mid < 0.0:
+			break
+		out.append(mid)
+		out.sort()
+	return out
+
+
+## a〜b の間（どちらも含まない）に、間隔が CP_MAX_GAP 以下になるよう均等に置くチェックポイントの距離（at_least 個以上）
+func _fill_gap(a: float, b: float, at_least: int) -> Array[float]:
+	var none: Array[float] = []
+	if b - a <= CP_MAX_GAP and at_least == 0:
+		return none
+	var best: Array[float] = none
+	var best_gap := INF
+	var n := maxi(at_least, ceili((b - a) / CP_MAX_GAP) - 1)
+	# 立てる所に寄せると間隔が広がるので、超えたら1つ増やして置き直す
+	for extra: int in 8:
+		var pts: Array[float] = []
+		for i: int in n + extra:
+			var d := _nearest_safe(a, b, a + (b - a) * (i + 1) / float(n + extra + 1))
+			if d >= 0.0 and not pts.has(d):
+				pts.append(d)
+		pts.sort()
+		var gap := 0.0
+		var prev := a
+		for d: float in pts:
+			gap = maxf(gap, d - prev)
+			prev = d
+		gap = maxf(gap, b - prev)
+		if gap < best_gap:
+			best_gap = gap
+			best = pts
+		if gap <= CP_MAX_GAP:
+			break
+	return best
+
+
+## a〜b の間（どちらも含まない）で、距離 d にいちばん近い立てる所の距離（無ければ -1）
+func _nearest_safe(a: float, b: float, d: float) -> float:
+	var best := -1.0
+	for s: Dictionary in safe:
+		var sd: float = s.dist
+		if sd <= a + 0.5 or sd >= b - 0.5:
+			continue
+		if best < 0.0 or absf(sd - d) < absf(best - d):
+			best = sd
+	return best
+
+
+## ルート距離 d 以降で最初に立てる所の距離（無ければ -1）
+func _safe_dist_after(d: float) -> float:
+	for s: Dictionary in safe:
+		if (s.dist as float) >= d:
+			return s.dist
+	return -1.0
+
+
+## スタート→チェックポイント→ゴールの一番長い間隔（m）
+func max_checkpoint_gap() -> float:
+	var gap := 0.0
+	var prev := 0.0
+	for d: float in checkpoint_dists:
+		gap = maxf(gap, d - prev)
+		prev = d
+	return maxf(gap, goal_dist - prev)
 
 
 func _safe_after(d: float) -> Transform3D:
@@ -877,11 +979,11 @@ func _decorate() -> void:
 				if not _is_clear(p, room * 0.5 + 0.8):
 					f += 2.0  # 近道の通り道には置かない
 					continue
-				f += _prop(kind, facing, along, room, usable - f) + rng.randf_range(2.0, 5.0)
+				f += _prop(kind, facing, along, room, usable - f, side) + rng.randf_range(2.0, 5.0)
 
 
 ## 小物を1つ置く。戻り値 = 使った奥行き（ルート方向）
-func _prop(kind: String, xf: Transform3D, along: Transform3D, room: float, left: float) -> float:
+func _prop(kind: String, xf: Transform3D, along: Transform3D, room: float, left: float, side: float = 1.0) -> float:
 	match kind:
 		"ac":
 			var n := rng.randi_range(1, 3)
@@ -914,7 +1016,8 @@ func _prop(kind: String, xf: Transform3D, along: Transform3D, room: float, left:
 				return 2.4
 		"billboard":
 			var colors: Array = theme.get("sign_colors", [Color(0.3, 0.6, 0.9)])
-			CourseProps.billboard(geo, xf * Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, room * 0.3)),
+			# 発光面（-Z）を道へ向け、さらに走ってくる人のほうへ35°振る（真横だと走りながら見えない）
+			CourseProps.billboard(geo, xf * Transform3D(Basis(Vector3.UP, deg_to_rad(35.0 * side)), Vector3(0, 0, room * 0.3)),
 					rng.randf_range(3.0, 5.0), rng.randf_range(1.6, 2.6), colors[rng.randi() % colors.size()], bool(theme.get("lit", false)))
 			return 4.0
 		"neon":
@@ -997,6 +1100,7 @@ func build_district(n: int = 7) -> void:
 	safe.append({"xf": start_xf, "dist": 0.0})
 	_place_markers()
 	checkpoints.clear()
+	checkpoint_dists.clear()
 	_decorate()
 
 

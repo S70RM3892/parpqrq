@@ -8,6 +8,8 @@ const FAR := 22.0
 
 var far_arrow: bool = true
 var color: Color = Color(1.0, 0.416, 0.102, 0.38)
+## true = 影だけを落とす人形（1人称の自分の影。カメラには写らない）
+var shadow_only: bool = false
 
 var _phase: float = 0.0
 var _state: int = 0
@@ -18,10 +20,15 @@ var _body: Node3D
 
 
 func _ready() -> void:
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = color
+	# 体はホログラム（縁が光り、走査線が流れる。shaders/ghost.gdshader）。影だけの人形は不透明の普通の材質
+	var mat: Material
+	if shadow_only:
+		mat = StandardMaterial3D.new()
+	else:
+		var sm := ShaderMaterial.new()
+		sm.shader = load("res://shaders/ghost.gdshader")
+		sm.set_shader_parameter(&"color", color)
+		mat = sm
 	_body = Node3D.new()
 	add_child(_body)
 	var hips := _pivot(&"hips", _body, Vector3(0, 0.95, 0))
@@ -38,8 +45,15 @@ func _ready() -> void:
 		_part(hip, CapsuleMesh, Vector3(0, -0.22, 0), Vector3(0.14, 0.46, 0.14), mat)
 		var knee := _pivot(StringName("shin_" + key), hip, Vector3(0, -0.44, 0))
 		_part(knee, CapsuleMesh, Vector3(0, -0.22, 0), Vector3(0.12, 0.46, 0.12), mat)
+	if shadow_only:
+		far_arrow = false
+		for mi: Node in _body.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		return
 	# 遠い時の矢印（壁越しにも見える）
-	var amat := mat.duplicate() as StandardMaterial3D
+	var amat := StandardMaterial3D.new()
+	amat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	amat.no_depth_test = true
 	amat.albedo_color = Color(color, 0.85)
 	amat.render_priority = 10
@@ -163,15 +177,15 @@ func _part(parent: Node3D, mesh_type: Variant, at: Vector3, size: Vector3, mat: 
 		var c := CapsuleMesh.new()
 		c.radius = size.x * 0.5
 		c.height = size.y
-		c.radial_segments = 8
-		c.rings = 2
+		c.radial_segments = 14
+		c.rings = 4
 		m = c
 	else:
 		var sp := SphereMesh.new()
 		sp.radius = size.x * 0.5
 		sp.height = size.y
-		sp.radial_segments = 10
-		sp.rings = 5
+		sp.radial_segments = 16
+		sp.rings = 8
 		m = sp
 	mi.mesh = m
 	mi.material_override = mat

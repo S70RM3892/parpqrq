@@ -46,6 +46,7 @@ func _build_background() -> void:
 	b.build(BG_RECIPE)
 	geo.build()
 	add_child(geo)
+	LevelLighting.apply(geo, "title")
 	var atmo := Atmosphere.new()
 	atmo.preset = &"morning"
 	atmo.fog_floor = -6.0
@@ -245,9 +246,9 @@ func _describe(id: String) -> void:
 	var c := CourseCatalog.get_course(id)
 	var m: Array = c.medals
 	var r := Game.record(id)
-	_info.text = "%s  %s      best %s      hidden shortcuts found %d / %d\nDEV %s   GOLD %s   SILVER %s   BRONZE %s      (DEV needs the shortcuts)" % [
+	_info.text = "%s  %s      best %s      hidden shortcuts found %d / %d\nDEV %s   ACE %s   GOLD %s   SILVER %s   BRONZE %s     (DEV and ACE need shortcuts)" % [
 			id, c.name, UITheme.format_time(r.best), r.shortcuts, r.shortcuts_total,
-			UITheme.format_time(m[0]), UITheme.format_time(m[1]), UITheme.format_time(m[2]), UITheme.format_time(m[3])]
+			UITheme.format_time(m[0]), UITheme.format_time(m[1]), UITheme.format_time(m[2]), UITheme.format_time(m[3]), UITheme.format_time(m[4])]
 
 
 ## 操作と技（走っている間は文字を出さないので、ここで覚える：仕様書 8章）

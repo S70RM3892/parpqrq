@@ -8,7 +8,8 @@ const PAPER := Color(0.97, 0.97, 0.96, 0.94)
 const MUTED := Color(0.42, 0.44, 0.48)
 const ACCENT := Color("#FF6A1A")
 const MEDAL_COLORS: Dictionary[String, Color] = {
-	"DEV": Color("#FF6A1A"), "GOLD": Color(0.95, 0.75, 0.2), "SILVER": Color(0.72, 0.75, 0.8), "BRONZE": Color(0.75, 0.5, 0.3),
+	"DEV": Color("#FF6A1A"), "ACE": Color(0.62, 0.94, 1.0), "GOLD": Color(0.95, 0.75, 0.2), "SILVER": Color(0.72, 0.75, 0.8),
+	"BRONZE": Color(0.75, 0.5, 0.3),
 }
 
 static var _theme: Theme

@@ -94,7 +94,11 @@ func show_result(r: Dictionary, has_next: bool) -> void:
 		if int(r.get("new_shortcuts", 0)) > 0:
 			sc += "   +%d new" % int(r.new_shortcuts)
 		elif found < total:
-			sc += "   (a marker shows the next one)" if bool(r.get("hint_on", false)) else "   (take GOLD for a hint)"
+			if bool(r.get("hint_on", false)):
+				sc += "   (a marker shows the next one)"
+			else:
+				var left := maxi(CourseTimer.HINT_FINISHES - int(r.get("finishes", 0)), 0)
+				sc += "   (take SILVER, or finish %d more time%s, for a marker)" % [left, "" if left == 1 else "s"]
 		lines.append(sc)
 	if r.route_off:
 		lines.append("Cleared with route color off")

@@ -143,6 +143,18 @@ night={
 "type": "float",
 "value": 0.0
 }
+level_lightmap={
+"type": "sampler2D",
+"value": ""
+}
+lightmap_on={
+"type": "float",
+"value": 0.0
+}
+wet={
+"type": "float",
+"value": 0.0
+}
 
 [physics]
 
@@ -150,6 +162,8 @@ night={
 common/physics_interpolation=true
 
 [rendering]
+
+anti_aliasing/quality/msaa_3d=2
 
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"

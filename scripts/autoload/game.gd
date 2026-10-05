@@ -27,7 +27,7 @@ func to_title(course_select: bool = true) -> void:
 	get_tree().change_scene_to_file(TITLE_SCENE)
 
 
-## コースの記録 {best: 秒 or INF, medal: "DEV"/"GOLD"/"SILVER"/"BRONZE"/"", route_off: bool, ghost: bool,
+## コースの記録 {best: 秒 or INF, medal: "DEV"/"ACE"/"GOLD"/"SILVER"/"BRONZE"/"", route_off: bool, ghost: bool,
 ##  shortcuts: 見つけた近道の数, shortcuts_total: 近道の数}
 func record(id: String) -> Dictionary:
 	var cfg := ConfigFile.new()

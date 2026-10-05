@@ -93,6 +93,7 @@ static func billboard(geo: LevelGeometry, xf: Transform3D, w: float, h: float, c
 	box(geo, xf, Vector3(0, 2.4 + h * 0.5, 0.05), Vector3(w + 0.2, h + 0.2, 0.25), Mat.DARK)
 	if lit:
 		box(geo, xf, Vector3(0, 2.4 + h * 0.5, -0.09), Vector3(w, h, 0.04), Mat.LIGHT, NC, color)
+		geo.add_light(xf * Vector3(0, 2.4 + h * 0.5, -1.2), color, 1.6, 7.0 + w)
 	else:
 		box(geo, xf, Vector3(0, 2.4 + h * 0.5, -0.09), Vector3(w, h, 0.04), Mat.ACCENT, NC, color)
 
@@ -103,6 +104,7 @@ static func neon(geo: LevelGeometry, xf: Transform3D, h: float, color: Color) ->
 	var n := int(h / 1.1)
 	for i: int in n:
 		box(geo, xf, Vector3(0, 0.6 + i * 1.1, -0.16), Vector3(0.6, 0.8, 0.04), Mat.LIGHT, NC, color)
+	geo.add_light(xf * Vector3(0, minf(h * 0.5, 2.2), -0.9), color, 1.4, 6.5)
 
 
 ## 照明（夜の駅前）
@@ -110,6 +112,7 @@ static func lamp(geo: LevelGeometry, xf: Transform3D) -> void:
 	geo.add_beam(xf * Vector3.ZERO, xf * Vector3(0, 3.2, 0), 0.06, Mat.DARK, NC, 6)
 	geo.add_beam(xf * Vector3(0, 3.2, 0), xf * Vector3(0, 3.2, -0.7), 0.04, Mat.DARK, NC, 6)
 	box(geo, xf, Vector3(0, 3.12, -0.75), Vector3(0.5, 0.1, 0.25), Mat.LIGHT, NC | NS, Color(1.0, 0.85, 0.6))
+	geo.add_light(xf * Vector3(0, 3.0, -0.75), Color(1.0, 0.82, 0.58), 6.0, 11.0, true)
 
 
 ## 足場（工事中）。w 横、h 高さ、d 奥行き

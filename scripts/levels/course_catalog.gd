@@ -8,8 +8,9 @@ extends RefCounted
 ## - 高さで緊張と解放：高所の細い足場 → 大ジャンプで広い屋上へ、を1コースに2〜3回
 ## - 主ルート＋近道：近道は色を付けず、屋上の物（室外機・足場・塔屋と電線・高い壁）の中に隠す。1コースに2〜5本。
 ##   エリア1は主ルートで教えた技（走り・ジャンプ・ヴォルト・ローリング）だけで回れる回り込み（detour_*）にする
-## メダル（開発者・ゴールド・シルバー・ブロンズ）は自動走行のタイム（Perfectを狙って走る）から決めた。
-## 開発者は近道を全部通った走り、ゴールドは主ルートだけの走りで取れる（近道を見つけないと開発者には届かない）。
+## メダル（開発者・エース・ゴールド・シルバー・ブロンズ）は自動走行のタイムから決めた（式は tests/course_test.gd の _suggest、表は docs/BALANCE.md）。
+## 開発者は完璧な走りで近道を全部通った時、エースは人の模型で近道を全部通った時、ゴールド・シルバー・ブロンズは人の模型の主ルートの走りで取れる
+## （近道を見つけないと開発者・エースには届かない）。
 
 const FREE_RUN := "free_run"
 
@@ -52,60 +53,60 @@ const AREAS: Array[Dictionary] = [
 	},
 ]
 
-## コース：id, area (0〜3), 名前, 乱数の種, 型の並び, メダル [開発者, ゴールド, シルバー, ブロンズ]（秒）
+## コース：id, area (0〜3), 名前, 乱数の種, 型の並び, メダル [開発者, エース, ゴールド, シルバー, ブロンズ]（秒）
 const COURSES: Array[Dictionary] = [
 	# --- 1. 朝の屋上（走り・ジャンプ・ヴォルト・ローリング）40〜60秒 ---
 	{"id": "1-1", "area": 0, "name": "First Light", "seed": 101,
 		"motifs": ["intro_jump", "intro_vault", "gap_rhythm", "intro_roll", "vault_rhythm", "turn", "detour_vault", "stairs_up", "release", "vault_rhythm", "detour_jump", "gap_rhythm"],
-		"medals": [36.0, 39.0, 47.0, 58.0]},
+		"medals": [35.7, 40.7, 42.0, 49.0, 59.0]},
 	{"id": "1-2", "area": 0, "name": "Laundry Lines", "seed": 102,
 		"motifs": ["vault_rhythm", "gap_rhythm", "turn", "detour_jump", "vault_rhythm", "detour_vault", "gap_rhythm", "turn", "detour_swing", "stairs_up", "release", "mix_a"],
-		"medals": [39.0, 43.0, 51.0, 63.0]},
+		"medals": [38.8, 41.5, 43.5, 50.0, 61.0]},
 	{"id": "1-3", "area": 0, "name": "Water Towers", "seed": 103,
 		"motifs": ["gap_rhythm", "detour_vault", "stairs_up", "tension", "turn", "mix_a", "detour_jump", "zip_jog", "vault_rhythm", "release"],
-		"medals": [36.0, 45.5, 54.0, 67.0]},
+		"medals": [35.7, 39.9, 45.5, 53.0, 64.0]},
 	{"id": "1-4", "area": 0, "name": "Sunrise Line", "seed": 104,
 		"motifs": ["mix_a", "detour_swing", "turn", "detour_vault", "tension", "detour_jump", "mix_a", "zip_jog", "stairs_up", "release", "vault_rhythm", "mix_a"],
-		"medals": [40.5, 52.5, 63.0, 78.0]},
+		"medals": [40.2, 46.8, 54.0, 62.0, 75.0]},
 	# --- 2. 工事中の高層（クライム・レッジグラブ・縦ウォールラン）60〜90秒 ---
 	{"id": "2-1", "area": 1, "name": "Scaffold Steps", "seed": 201,
 		"motifs": ["intro_climb", "gap_rhythm", "intro_ledge", "swing_gap", "intro_wallclimb", "turn", "climb_rhythm", "beam_cross", "kick_wall", "release", "climb_rhythm"],
-		"medals": [42.5, 45.5, 54.0, 67.0]},
+		"medals": [42.3, 44.8, 45.5, 53.0, 63.0]},
 	{"id": "2-2", "area": 1, "name": "Steel Frames", "seed": 202,
 		"motifs": ["climb_rhythm", "swing_gap", "turn", "ledge_rhythm", "kick_wall", "tower", "turn", "gap_rhythm", "climb_rhythm", "detour_jump", "release", "mix_b"],
-		"medals": [51.5, 55.0, 66.0, 82.0]},
+		"medals": [51.1, 52.9, 55.0, 64.0, 77.0]},
 	{"id": "2-3", "area": 1, "name": "Crane Yard", "seed": 203,
 		"motifs": ["mix_b", "swing_gap", "turn", "tower", "kick_wall", "climb_rhythm", "zip_jog", "mix_b", "detour_jump", "tower", "vault_rhythm"],
-		"medals": [52.0, 60.5, 72.0, 90.0]},
+		"medals": [51.9, 55.7, 62.0, 72.0, 86.0]},
 	{"id": "2-4", "area": 1, "name": "Topping Out", "seed": 204,
 		"motifs": ["climb_rhythm", "kick_wall", "tower", "turn", "swing_gap", "beam_cross", "mix_b", "zip_jog", "detour_vault", "tower", "detour_jump", "climb_rhythm", "release", "mix_b"],
-		"medals": [61.5, 72.5, 86.0, 107.0]},
+		"medals": [61.4, 65.0, 72.5, 84.0, 101.0]},
 	# --- 3. 夕方の繁華街（横ウォールラン・壁ジャンプ）60〜90秒 ---
 	{"id": "3-1", "area": 2, "name": "Neon Alley", "seed": 301,
 		"motifs": ["intro_wallrun", "vault_rhythm", "gap_rhythm", "intro_walljump", "zip_jog", "wallrun_rhythm", "climb_rhythm", "detour_wallrun", "release", "wallrun_rhythm"],
-		"medals": [44.0, 53.5, 64.0, 79.0]},
+		"medals": [43.6, 47.8, 55.5, 64.0, 77.0]},
 	{"id": "3-2", "area": 2, "name": "Billboard Run", "seed": 302,
 		"motifs": ["wallrun_rhythm", "mix_c", "zip_jog", "alley", "kick_wall", "tower", "detour_wallrun", "turn", "wallrun_rhythm", "detour_vault", "release", "mix_c"],
-		"medals": [53.0, 64.0, 76.0, 95.0]},
+		"medals": [52.7, 58.8, 66.5, 77.0, 93.0]},
 	{"id": "3-3", "area": 2, "name": "Rush Hour", "seed": 303,
 		"motifs": ["mix_c", "alley", "zip_jog", "wallrun_rhythm", "swing_gap", "detour_wallrun", "mix_c", "turn", "alley", "detour_vault", "tension", "wallrun_rhythm", "mix_c"],
-		"medals": [54.5, 67.5, 80.0, 100.0]},
+		"medals": [54.2, 61.7, 69.5, 80.0, 97.0]},
 	{"id": "3-4", "area": 2, "name": "Last Light", "seed": 304,
 		"motifs": ["wallrun_rhythm", "alley", "mix_c", "zip_jog", "tower", "kick_wall", "detour_wallrun", "mix_b", "turn", "swing_gap", "mix_c", "release", "wallrun_rhythm", "mix_c"],
-		"medals": [66.5, 76.0, 91.0, 113.0]},
+		"medals": [66.5, 72.2, 79.0, 92.0, 111.0]},
 	# --- 4. 夜の駅前（スライド・長い下り坂・全部の組み合わせ）90〜150秒 ---
 	{"id": "4-1", "area": 3, "name": "Last Train", "seed": 401,
 		"motifs": ["intro_slide", "vault_rhythm", "intro_slope", "detour_vault", "slide_rhythm", "zip_jog", "wallrun_rhythm", "climb_rhythm", "downhill", "detour_wallrun", "mix_d", "turn", "slide_rhythm", "release", "mix_d"],
-		"medals": [71.5, 84.5, 101.0, 125.0]},
+		"medals": [71.4, 76.4, 85.5, 99.0, 120.0]},
 	{"id": "4-2", "area": 3, "name": "Platform Seven", "seed": 402,
 		"motifs": ["mix_d", "downhill", "zip_jog", "alley", "slide_rhythm", "tower", "detour_jump", "mix_d", "swing_gap", "wallrun_rhythm", "downhill", "kick_wall", "slide_rhythm", "release", "mix_d", "mix_c"],
-		"medals": [84.5, 96.0, 114.0, 142.0]},
+		"medals": [84.3, 89.2, 98.0, 113.0, 137.0]},
 	{"id": "4-3", "area": 3, "name": "Overpass", "seed": 403,
 		"motifs": ["slide_rhythm", "detour_vault", "turn", "tower", "downhill", "alley", "detour_wallrun", "mix_d", "zip_jog", "mix_b", "downhill", "swing_gap", "tension", "kick_wall", "mix_d", "release", "mix_d"],
-		"medals": [83.5, 96.0, 115.0, 142.0]},
+		"medals": [83.4, 88.6, 97.5, 113.0, 136.0]},
 	{"id": "4-4", "area": 3, "name": "Terminal", "seed": 404,
 		"motifs": ["mix_d", "downhill", "alley", "zip_jog", "tower", "slide_rhythm", "detour_jump", "mix_c", "turn", "detour_vault", "mix_b", "swing_gap", "detour_wallrun", "tension", "kick_wall", "turn", "slide_rhythm", "downhill", "release", "mix_d"],
-		"medals": [96.0, 106.5, 127.0, 158.0]},
+		"medals": [95.7, 100.9, 107.5, 124.0, 150.0]},
 ]
 
 
@@ -122,7 +123,7 @@ static func get_course(id: String) -> Dictionary:
 		if c.id == id:
 			return c
 	if id == FREE_RUN:
-		return {"id": FREE_RUN, "area": 4, "name": "Free Run", "seed": 501, "motifs": [], "medals": [0.0, 0.0, 0.0, 0.0]}
+		return {"id": FREE_RUN, "area": 4, "name": "Free Run", "seed": 501, "motifs": [], "medals": [0.0, 0.0, 0.0, 0.0, 0.0]}
 	return {}
 
 

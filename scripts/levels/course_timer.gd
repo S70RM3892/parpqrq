@@ -18,14 +18,19 @@ signal shortcut_found(shortcut_name: String, found: int, total: int)
 const SAVE_PATH := "user://best_times.cfg"
 const SPLIT_SHOW := 1.5
 const RESULT_SHOW := 6.0
-const MEDALS: PackedStringArray = ["DEV", "GOLD", "SILVER", "BRONZE"]
+## メダルは速い順（Neon White の開発者・エース・ゴールド・シルバー・ブロンズにならう）。基準タイムも同じ並び
+const MEDALS: PackedStringArray = ["DEV", "ACE", "GOLD", "SILVER", "BRONZE"]
+## 近道の目印が出る条件：自己ベストがシルバー以内（MEDALS の番号）、または同じコースを HINT_FINISHES 回ゴールした
+const SILVER_INDEX := 3
+const GOLD_INDEX := 2
+const HINT_FINISHES := 5
 const GREEN := Color(0.4, 1.0, 0.5)
 const GOLD := Color(1.0, 0.85, 0.35)
 const RED := Color(1.0, 0.45, 0.4)
 
 @export var course_id: String = "test_course"
-## メダルの基準タイム（秒）。開発者・ゴールド・シルバー・ブロンズの順
-@export var medal_times: PackedFloat32Array = [15.5, 17.0, 20.0, 25.0]  # 自動走行（Perfect 8回）で16.2秒
+## メダルの基準タイム（秒）。開発者・エース・ゴールド・シルバー・ブロンズの順
+@export var medal_times: PackedFloat32Array = [15.5, 16.5, 17.0, 20.0, 25.0]  # 自動走行（Perfect 8回）で16.2秒
 ## true = ゴールの結果を上の表示に出す（白箱コース。生成コースは結果画面が出す）
 @export var show_result_label: bool = true
 
@@ -39,6 +44,8 @@ var last_run: RunRecording
 var best_run := RunRecording.new()
 
 var _best: float = INF
+## このコースをゴールした回数（保存する。近道の目印の条件）
+var _finishes: int = 0
 var _best_splits: PackedFloat32Array = []
 var _splits: PackedFloat32Array = []
 var _shown: float = 0.0
@@ -46,6 +53,11 @@ var _max_speed: float = 0.0
 var _perfects_at_start: int = 0
 var _player: Player
 var _ghost_body: GhostBody
+## 開発者のゴースト（ゴールドを取ると一緒に走る。近道を全部通る自動走行の記録）
+var dev_run := RunRecording.new()
+var dev_time: float = 0.0
+var _dev_body: GhostBody
+var _dev_node: Node3D
 ## 隠れた近道（Course が渡す：CourseBuilder.shortcuts）。{name, found_xf, found_size, found_states（状態の名前）, ...}
 var shortcuts: Array[Dictionary] = []
 ## これまでに見つけた近道の名前（保存する）／この走りで通った近道／この走りで初めて見つけた近道
@@ -111,6 +123,21 @@ static func medal_for(t: float, times: PackedFloat32Array) -> String:
 	return ""
 
 
+## 近道の目印を出すか：自己ベストがシルバー以内、または同じコースを HINT_FINISHES 回ゴールした
+static func hint_for(best: float, times: PackedFloat32Array, finishes: int) -> bool:
+	if finishes >= HINT_FINISHES:
+		return true
+	return times.size() > SILVER_INDEX and times[SILVER_INDEX] > 0.0 and best <= times[SILVER_INDEX]
+
+
+## 保存してあるゴールした回数（持ち主の記録は id ごと。テストは "test_<id>" などの別のIDで取る）
+static func finish_count(id: String) -> int:
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_PATH) != OK:
+		return 0
+	return int(cfg.get_value("finishes", id, 0))
+
+
 func _ready() -> void:
 	($StartArea as Area3D).body_exited.connect(_on_start_exited)
 	($GoalArea as Area3D).body_entered.connect(_on_goal_entered)
@@ -124,7 +151,27 @@ func _ready() -> void:
 	_ghost_body = GhostBody.new()
 	_ghost.add_child(_ghost_body)
 	_ghost.visible = false
+	_dev_node = Node3D.new()
+	_dev_node.name = "DevGhost"
+	_dev_node.top_level = true
+	add_child(_dev_node)
+	_dev_body = GhostBody.new()
+	_dev_body.color = Color(0.75, 0.95, 1.0, 0.42)
+	_dev_node.add_child(_dev_body)
+	_dev_node.visible = false
 	_bind_player.call_deferred()
+
+
+## 開発者のゴーストを渡す（Course が assets/ghosts から読む）
+func set_dev_ghost(run: RunRecording, time: float) -> void:
+	dev_run = run
+	dev_time = time
+
+
+## 開発者のゴーストと走れるか：ゴールド以内の自己ベストがある（MEDALS の GOLD）
+func dev_ghost_unlocked() -> bool:
+	return dev_run.size() > 0 and medal_times.size() > GOLD_INDEX and medal_times[GOLD_INDEX] > 0.0 \
+			and _best <= medal_times[GOLD_INDEX]
 
 
 func _bind_player() -> void:
@@ -158,6 +205,7 @@ func _on_respawned(to_start: bool) -> void:
 	if to_start:
 		running = false
 		_ghost.visible = false
+		_dev_node.visible = false
 		_found_run.clear()
 		_new_run = 0
 
@@ -176,6 +224,7 @@ func _on_start_exited(body: Node3D) -> void:
 	_new_run = 0
 	recording.clear()
 	_ghost.visible = best_run.size() > 0
+	_dev_node.visible = dev_ghost_unlocked()
 	started.emit()
 
 
@@ -196,12 +245,14 @@ func _on_goal_entered(body: Node3D) -> void:
 		return
 	running = false
 	_ghost.visible = false
+	_dev_node.visible = false
 	var t := elapsed
 	var prev := _best
 	var had_best := _best < INF
 	var diff := t - _best
 	var medal := _medal_for(t)
 	var perfects := _player.perfect_count - _perfects_at_start
+	count_finish()
 	last_run = recording.duplicate_run()
 	var new_best := t < _best
 	if new_best:
@@ -217,7 +268,8 @@ func _on_goal_entered(body: Node3D) -> void:
 		"next_medal": next.get("medal", ""), "next_time": next.get("time", 0.0),
 		"shortcuts_total": shortcuts.size(), "shortcuts_found": _found.size(),
 		"shortcuts_used": _found_run.size(), "new_shortcuts": _new_run,
-		"hint_on": medal_times.size() > 1 and _best <= medal_times[1] and _found.size() < shortcuts.size(),
+		"hint_on": hint_for(_best, medal_times, _finishes) and _found.size() < shortcuts.size(),
+		"dev_ghost": dev_ghost_unlocked(), "dev_time": dev_time,
 	}
 	if show_result_label:
 		var lines: PackedStringArray = []
@@ -239,13 +291,27 @@ func use_records(id: String, clear: bool) -> void:
 	if clear:
 		var cfg := ConfigFile.new()
 		if cfg.load(SAVE_PATH) == OK:
-			for section: String in ["best", "splits", "route_off", "shortcuts"]:
+			for section: String in ["best", "splits", "route_off", "shortcuts", "finishes"]:
 				if cfg.has_section_key(section, id):
 					cfg.erase_section_key(section, id)
 			cfg.save(SAVE_PATH)
 		if FileAccess.file_exists(_ghost_path()):
 			DirAccess.remove_absolute(_ghost_path())
 	_load()
+
+
+## ゴールした回数を1つ増やして保存する（ゴールのたびに呼ぶ）
+func count_finish() -> void:
+	_finishes += 1
+	var cfg := ConfigFile.new()
+	cfg.load(SAVE_PATH)
+	cfg.set_value("finishes", course_id, _finishes)
+	cfg.save(SAVE_PATH)
+
+
+## 今の自己ベストとゴールした回数で、近道の目印を出すか
+func hint_unlocked() -> bool:
+	return hint_for(_best, medal_times, _finishes)
 
 
 ## 隠れた近道を渡す（発見の判定に使う）
@@ -341,6 +407,10 @@ func _show(text: String, color: Color, time: float) -> void:
 
 
 func _update_ghost(delta: float) -> void:
+	if _dev_node.visible:
+		var d := mini(recording.size() - 1, dev_run.size() - 1)
+		if d >= 0:
+			_dev_body.show_frame(dev_run.sample(d), delta)
 	if best_run.size() == 0:
 		return
 	var i := mini(recording.size() - 1, best_run.size() - 1)
@@ -365,13 +435,17 @@ func _ghost_path() -> String:
 func _load() -> void:
 	var cfg := ConfigFile.new()
 	_found.clear()
+	_finishes = 0
 	if cfg.load(SAVE_PATH) == OK:
 		_best = cfg.get_value("best", course_id, INF)
+		_finishes = int(cfg.get_value("finishes", course_id, 0))
 		_best_splits = cfg.get_value("splits", course_id, PackedFloat32Array())
 		for n: String in cfg.get_value("shortcuts", course_id, PackedStringArray()):
 			_found[n] = true
 	if FileAccess.file_exists(_ghost_path()):
 		var f := FileAccess.open(_ghost_path(), FileAccess.READ)
+		if f == null or f.get_length() < 8:
+			return  # 書きかけで終わった・空のゴースト（読まない）
 		var data: Variant = f.get_var()
 		if data is Dictionary:
 			best_run = RunRecording.from_dict(data)

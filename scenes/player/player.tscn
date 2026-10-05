@@ -5,8 +5,6 @@
 [ext_resource type="Script" path="res://scripts/player/camera_rig.gd" id="3_rig"]
 [ext_resource type="Script" path="res://scripts/player/body/arms.gd" id="4_arms"]
 [ext_resource type="Script" path="res://scripts/player/body/legs.gd" id="5_legs"]
-[ext_resource type="ArrayMesh" path="res://assets/body/hand_r.res" id="6_hand"]
-[ext_resource type="Material" path="res://assets/body/hand_material.tres" id="7_handmat"]
 [ext_resource type="ArrayMesh" path="res://assets/body/leg_thigh.res" id="8_thigh"]
 [ext_resource type="ArrayMesh" path="res://assets/body/leg_shin.res" id="9_shin"]
 [ext_resource type="ArrayMesh" path="res://assets/body/leg_foot.res" id="10_foot"]
@@ -15,6 +13,8 @@
 [ext_resource type="Shader" path="res://shaders/screen_fx.gdshader" id="13_edge"]
 [ext_resource type="Script" path="res://scripts/player/wind_streaks.gd" id="14_wind"]
 [ext_resource type="Script" path="res://scripts/player/player_audio.gd" id="15_audio"]
+[ext_resource type="Script" path="res://scripts/player/body/hand_model.gd" id="16_hand"]
+[ext_resource type="Script" path="res://scripts/player/player_fx.gd" id="17_fx"]
 
 [sub_resource type="ShaderMaterial" id="Mat_edge"]
 shader = ExtResource("13_edge")
@@ -65,18 +65,14 @@ rig = NodePath("../../../../../../..")
 
 [node name="Right" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms"]
 
-[node name="Hand" type="MeshInstance3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms/Right"]
-cast_shadow = 0
-mesh = ExtResource("6_hand")
-surface_material_override/0 = ExtResource("7_handmat")
+[node name="Hand" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms/Right"]
+script = ExtResource("16_hand")
 
 [node name="Left" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms"]
 
-[node name="Hand" type="MeshInstance3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms/Left"]
+[node name="Hand" type="Node3D" parent="CameraRig/Pitch/Bob/Dip/Tilt/Shake/Camera3D/Arms/Left"]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
-cast_shadow = 0
-mesh = ExtResource("6_hand")
-surface_material_override/0 = ExtResource("7_handmat")
+script = ExtResource("16_hand")
 
 [node name="Body" type="Node3D" parent="." node_paths=PackedStringArray("player")]
 top_level = true
@@ -166,3 +162,7 @@ theme_override_constants/outline_size = 10
 theme_override_font_sizes/font_size = 40
 text = "PERFECT"
 horizontal_alignment = 1
+
+[node name="FX" type="Node3D" parent="." node_paths=PackedStringArray("player")]
+script = ExtResource("17_fx")
+player = NodePath("..")

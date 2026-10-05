@@ -2,7 +2,7 @@ class_name Course
 extends Node3D
 ## 1本のコース（仕様書 7章）。CourseCatalog のレシピから実行時に組み立てる（読み込み画面なしで数百ms）。
 ## 子: Atmosphere（空・霧・太陽）、Geometry（屋上と小物）、GrabLines（スイングバー・ジップライン）、Backdrop（遠景）、
-## CourseTimer、Checkpoint、Player、ShortcutHint（金メダルの後、まだ見つけていない近道の入口に出す目印）
+## CourseTimer、Checkpoint、Player、ShortcutHint（シルバー以内か5回ゴールした後、まだ見つけていない近道の入口に出す目印）
 
 const PLAYER_SCENE := preload("res://scenes/player/player.tscn")
 const CHECKPOINT_SIZE := Vector3(16, 8, 2)
@@ -19,10 +19,16 @@ var player: Player
 var timer: CourseTimer
 var free_run: bool = false
 var build_ms: int = 0
+## 焼いた光がこのコースの形に合っているか（false = 焼き直していない。コーステストが落とす）
+var lightmap_ok: bool = false
+## コースの形の指紋（焼いた光と開発者のゴーストがこの形で作られたかを確かめる）
+var geometry_hash: String = ""
+## 開発者のゴーストがこのコースの形に合っているか（false = 記録し直していない。コーステストが落とす）
+var dev_ghost_ok: bool = false
 var pause_menu: PauseMenu
 var results: ResultsPanel
 var replay: ReplayViewer
-## 近道の目印（金メダルを取ったら、まだ見つけていない近道を1つだけ示す）
+## 近道の目印（シルバー以内か5回ゴールしたら、まだ見つけていない近道を1つだけ示す）
 var _hint: LevelGeometry
 var hint_shortcut: String = ""
 
@@ -46,6 +52,15 @@ func _ready() -> void:
 		builder.build(CourseCatalog.recipe(course_id))
 	geo.build()
 	add_child(geo)
+	geometry_hash = geo.lightmap_hash
+	lightmap_ok = LevelLighting.apply(geo, course_id)
+	var sky := Atmosphere.preset_for(area.time, Atmosphere.step_for(course_id))
+	if bool(area.get("lit", false)):
+		_spawn_lights(geo.lights, float(sky.night))
+	var probe_spots := geo.glass_spots.duplicate()
+	if float(sky.get("wet", 0.0)) >= WET_PROBES:
+		probe_spots.append_array(_along_route(builder.route_points, PROBE_MERGE * 1.05))
+	_spawn_reflection_probes(probe_spots, MAX_PROBES_WET if float(sky.get("wet", 0.0)) >= WET_PROBES else MAX_PROBES)
 	var grabs := GrabLines.new()
 	grabs.name = "GrabLines"
 	grabs.lines = builder.grab_lines
@@ -54,13 +69,15 @@ func _ready() -> void:
 	var atmo := Atmosphere.new()
 	atmo.name = "Atmosphere"
 	atmo.preset = area.time
+	atmo.step = Atmosphere.step_for(course_id)
 	atmo.fog_floor = builder.min_floor_y - 6.0
 	add_child(atmo)
 
 	var backdrop := Backdrop.new()
 	backdrop.name = "Backdrop"
 	add_child(backdrop)
-	backdrop.build(builder.route_points, CourseBuilder.STREET_Y, builder.start_xf.origin.y, int(def.get("seed", 1)))
+	backdrop.build(builder.route_points, CourseBuilder.STREET_Y, builder.start_xf.origin.y, int(def.get("seed", 1)),
+			int(def.get("area", 0)))
 
 	for i: int in builder.checkpoints.size():
 		var cp := Checkpoint.new()
@@ -78,6 +95,7 @@ func _ready() -> void:
 		timer = CourseTimer.create(course_id, PackedFloat32Array(def.get("medals", [])), builder.start_xf, builder.goal_xf, builder.splits)
 		add_child(timer)
 		timer.set_shortcuts(builder.shortcuts)
+		_load_dev_ghost()
 		timer.shortcut_found.connect(func(sc_name: String, _found: int, _total: int) -> void:
 			if sc_name == hint_shortcut:
 				update_shortcut_hint())
@@ -100,14 +118,116 @@ func _ready() -> void:
 			course_id, geo.primitive_count, backdrop.building_count, builder.route_len, build_ms])
 
 
+## 街灯・ネオン・看板の灯り（夕方・夜）。Mobile レンダラーは1つのメッシュに灯り8つまでなので、
+## LevelGeometry の区画（40 m）ごとに MAX_LIGHTS_PER_CHUNK までに抑える。影は落とさない（重い）
+const MAX_LIGHTS_PER_CHUNK := 5
+
+
+func _spawn_lights(list: Array[Dictionary], night_k: float) -> void:
+	var per_chunk: Dictionary[Vector2i, int] = {}
+	var k := lerpf(0.45, 1.0, clampf((night_k - 0.3) / 0.7, 0.0, 1.0))
+	for l: Dictionary in list:
+		var pos: Vector3 = l.pos
+		var c := Vector2i(floori(pos.x / LevelGeometry.CHUNK), floori(pos.z / LevelGeometry.CHUNK))
+		if per_chunk.get(c, 0) >= MAX_LIGHTS_PER_CHUNK:
+			continue
+		per_chunk[c] = per_chunk.get(c, 0) + 1
+		var light: Light3D
+		if l.down:
+			var sp := SpotLight3D.new()
+			sp.spot_range = l.range
+			sp.spot_angle = 58.0
+			sp.spot_attenuation = 0.8
+			sp.rotation_degrees = Vector3(-90, 0, 0)
+			light = sp
+		else:
+			var om := OmniLight3D.new()
+			om.omni_range = l.range
+			om.omni_attenuation = 1.4
+			light = om
+		light.position = pos
+		light.light_color = l.color
+		light.light_energy = float(l.energy) * k
+		light.light_specular = 0.6
+		light.shadow_enabled = false
+		light.distance_fade_enabled = true
+		light.distance_fade_begin = 70.0
+		light.distance_fade_length = 20.0
+		add_child(light)
+
+
+## ガラスの床・天窓の上に反射プローブ（一度だけ撮る）。ガラスに周りのビルや手すりが映る。
+## 雨上がりのコース（wet が WET_PROBES 以上）はルート沿いにも置き、水たまりに窓・看板・街灯が映る。
+## 近いものはまとめ、MAX_PROBES までにする（読み込みの時に撮るので数を抑える）
+const MAX_PROBES := 6
+const MAX_PROBES_WET := 32
+const WET_PROBES := 0.25
+const PROBE_MERGE := 35.0
+
+
+## 道筋に沿って step m ごとの点
+func _along_route(points: PackedVector3Array, step: float) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var left := 0.0
+	for i: int in range(1, points.size()):
+		var a := points[i - 1]
+		var b := points[i]
+		var seg := a.distance_to(b)
+		var t := left
+		while t < seg:
+			out.append(a.lerp(b, t / seg))
+			t += step
+		left = t - seg
+	return out
+
+
+func _spawn_reflection_probes(spots: PackedVector3Array, max_count: int) -> void:
+	var placed: Array[Vector3] = []
+	for p: Vector3 in spots:
+		var near := false
+		for q: Vector3 in placed:
+			if q.distance_to(p) < PROBE_MERGE:
+				near = true
+				break
+		if near:
+			continue
+		placed.append(p)
+		if placed.size() >= max_count:
+			break
+	for p: Vector3 in placed:
+		var probe := ReflectionProbe.new()
+		probe.update_mode = ReflectionProbe.UPDATE_ONCE
+		probe.size = Vector3(PROBE_MERGE + 10.0, 24.0, PROBE_MERGE + 10.0)
+		probe.origin_offset = Vector3(0, -6.5, 0)  # 床から1.5 m で撮る
+		probe.position = p + Vector3.UP * 8.0
+		probe.box_projection = true
+		probe.interior = false
+		probe.max_distance = 120.0
+		probe.mesh_lod_threshold = 4.0
+		add_child(probe)
+
+
+## 開発者のゴースト（assets/ghosts/<id>.res）。形が記録した時と違えば使わない
+func _load_dev_ghost() -> void:
+	var path := GhostData.path_for(course_id)
+	if not ResourceLoader.exists(path):
+		return
+	var g := load(path) as GhostData
+	if g == null or g.fingerprint != geometry_hash:
+		return
+	dev_ghost_ok = true
+	timer.set_dev_ghost(RunRecording.from_dict(g.run), g.time)
+
+
 ## フリーラン：屋上に立っている間、落ちた時の戻り先をそこにする
 func _remember_footing() -> void:
 	if player.state == Player.State.GROUND and player.is_on_floor() and player.horizontal_speed() < player.params.run_speed * 1.5:
 		player.checkpoint = Transform3D(Basis(Vector3.UP, player.rig.yaw), player.global_position)
 
 
-## 近道の目印：自己ベストがゴールド以上で、まだ見つけていない近道があれば、その入口に光る菱形と細い光の柱を出す。
-## 1つ見つけたら次へ移る（全部の答えは見せない）。Neon White は金メダルの後に近道の場所を示す
+## 近道の目印：自己ベストがシルバー以内（または同じコースを5回ゴール）で、まだ見つけていない近道があれば、
+## その入口に光る菱形と細い光の柱を出す。1つ見つけたら次へ移る（全部の答えは見せない）。
+## Neon White は繰り返し遊ぶほどヒントが開く（条件は CourseTimer.hint_for）
 func update_shortcut_hint() -> void:
 	if _hint != null:
 		_hint.queue_free()
@@ -115,8 +235,7 @@ func update_shortcut_hint() -> void:
 	hint_shortcut = ""
 	if timer == null or builder.shortcuts.is_empty():
 		return
-	var medals: Array = def.get("medals", [])
-	if medals.size() < 2 or timer.best_time() > float(medals[1]):
+	if not timer.hint_unlocked():
 		return
 	for sc: Dictionary in builder.shortcuts:
 		if timer.is_shortcut_found(sc.name):
@@ -157,7 +276,7 @@ func _build_menus() -> void:
 
 ## ゴール：入力を止めて結果を出す（体は惰性で少し進んで止まる）
 func _on_finished(r: Dictionary) -> void:
-	update_shortcut_hint()  # 初めて金メダルを取ったら、リトライからもう目印が出る
+	update_shortcut_hint()  # 初めてシルバー以内か5回目のゴールなら、リトライからもう目印が出る
 	player.input_enabled = false
 	player.rig.mouse_capture_enabled = false
 	pause_menu.enabled = false

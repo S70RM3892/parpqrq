@@ -8,6 +8,23 @@ extends Node
 ## - 1.1 の技：ヴォルトジャンプ（障害物の上でもう一度押す）・スイング（理想の角度で離す）・
 ##   ジップライン（終点の少し手前で離す）・縦ウォールランの頂点で蹴り上がる。どれもPerfectを狙う
 ## 主ルートの道しるべ（dist >= 0）を通り過ぎた時刻を passed に残す（近道でどれだけ速くなったかをテストが比べる）
+## 人の模型（human = true）：腕のいい人が少しずれて押す。変えるのは「押す瞬間」だけ（物理・手触りの数値には触らない）
+## - 技の入力（ジャンプ・しゃがみ・壁蹴り・スイング/ジップの離し・縦ウォールランの蹴り・ヴォルトジャンプの2度目）は、
+##   完璧な走りが押す瞬間の HUMAN_DELAY_MIN〜MAX フレーム後に押す（Perfect の ±0.05 s は普通は外れる）
+## - 着地のローリングだけは遅らせず、同じ 4〜8 フレーム早く押す（遅らせると着地後の0.08 sを過ぎるか、着地の±0.05 sに収まって Perfect になる）
+## - 縁・壁のジャンプ（ギャップ・段差・よじ登り・縦ウォールランの駆け上がり。ヴォルト以外の Act.JUMP）は、人は先読みして手前で早めに跳ぶので
+##   0〜HUMAN_EARLY_MAX フレーム早い（壁へ駆け込んで遅れると、跳ぶ前にぶつかって止まる）
+## - 乱数は seed_value で固定（同じコース・同じ種なら毎回同じ走り）
+
+## 人の模型の押す遅れ（フレーム）。完璧な走りが押す瞬間から 0.067〜0.133 s 後
+const HUMAN_DELAY_MIN := 4
+const HUMAN_DELAY_MAX := 8
+## 縁・壁のジャンプを早める最大（フレーム）。ヴォルトの道しるべは lead_t が 0.15（体が着く0.15秒前 = Perfect）、
+## 縁は 0.03、よじ登りと縦ウォールランは 0.1〜0.12。時刻の Perfect があるのはヴォルトだけなので、それ以外は人が先読みして早めに跳ぶ
+const HUMAN_EARLY_MAX := 4
+const VAULT_LEAD_T := 0.15
+## 人の模型のローリングを着地の何秒前までに押すか（roll_window_before = 0.2 s の内側）
+const HUMAN_ROLL_MAX_TIME := 0.18
 
 var player: Player
 var nodes: Array[Dictionary] = []
@@ -39,6 +56,16 @@ var _vault_jump_pending: bool = false
 var _prev_swing: float = 0.0
 ## 主ルートの道しるべの dist → 通り過ぎたフレーム
 var passed: Dictionary = {}
+## 人の模型（start() の前に決める）
+var human: bool = false
+var seed_value: int = 1
+var rng := RandomNumberGenerator.new()
+## 人の模型：遅らせて押す入力 {at: 押すフレーム, kind: &"jump" / &"crouch", hold: 押している長さ}
+var _queue: Array[Dictionary] = []
+## 縁のジャンプを何フレーム早めるか（道しるべの番号 → フレーム。最初に見た時に1回だけ振る）
+var _early: Dictionary = {}
+## 人の模型：今回の落下でローリングを早める量（フレーム。-1 = まだ振っていない）
+var _roll_early: float = -1.0
 
 
 func start(p: Player, route: Array[Dictionary]) -> void:
@@ -46,6 +73,7 @@ func start(p: Player, route: Array[Dictionary]) -> void:
 	nodes = route
 	idx = 0
 	_start = p.global_position
+	rng.seed = seed_value
 	# 自動走行はリトライを押さないので、戻されたら必ず落下（チェックポイント前ならスタートへ戻る）
 	player.respawned.connect(func(_to_start: bool) -> void:
 		falls += 1
@@ -72,6 +100,7 @@ func _physics_process(delta: float) -> void:
 		_release_jump_at = _frame + _press_hold
 	if _frame == _release_crouch_at:
 		Input.action_release(&"crouch")
+	_fire_queue()
 	var p := player
 	var pos := p.global_position
 	var spd := p.horizontal_speed()
@@ -101,12 +130,16 @@ func _physics_process(delta: float) -> void:
 			continue
 		var remaining := _remaining(k, pos)
 		var lead := float(n.lead_c) + spd * float(n.lead_t)
+		# 人の模型：縁のジャンプは早め（遅らせない）
+		var early := human and act == CourseBuilder.Act.JUMP and float(n.lead_t) < VAULT_LEAD_T - 0.01
+		if early:
+			lead += spd * _early_frames(k) / 60.0
 		var roll_ready := p.state == Player.State.ROLL and p.state_time >= p.params.roll_duration * 0.5 - 0.1
 		match act:
 			CourseBuilder.Act.JUMP, CourseBuilder.Act.VAULT_JUMP:
 				# ローリング中のジャンプは後半（先行入力0.15秒込み）からしか効かない
 				if remaining <= lead and (p.state in [Player.State.GROUND, Player.State.SLIDE] or roll_ready):
-					_press_jump(12)
+					_press_jump(12, not early)
 					_vault_jump_pending = act == CourseBuilder.Act.VAULT_JUMP
 					_advance(k + 1)
 			CourseBuilder.Act.CROUCH:
@@ -213,8 +246,41 @@ func _heading() -> Vector3:
 	return Basis(Vector3.UP, player.rig.yaw) * Vector3.FORWARD
 
 
-func _press_jump(hold_frames: int) -> void:
-	_wait_until = _frame + 3
+## ジャンプを押す（人の模型なら遅らせる。late = false は遅らせない：縁のジャンプは lead を広げて早めている）
+func _press_jump(hold_frames: int, late: bool = true) -> void:
+	_act(&"jump", hold_frames, late)
+
+
+func _tap_crouch() -> void:
+	_act(&"crouch", 1, true)
+
+
+## 入力する。人の模型は HUMAN_DELAY_MIN〜MAX フレーム後に押す（その間は次の判断もしない）
+func _act(kind: StringName, hold_frames: int, late: bool) -> void:
+	var delay := rng.randi_range(HUMAN_DELAY_MIN, HUMAN_DELAY_MAX) if human and late else 0
+	_wait_until = _frame + 3 + delay
+	if delay == 0:
+		_fire(kind, hold_frames)
+	else:
+		_queue.append({"at": _frame + delay, "kind": kind, "hold": hold_frames})
+
+
+func _fire_queue() -> void:
+	var i := 0
+	while i < _queue.size():
+		if int(_queue[i].at) <= _frame:
+			var q: Dictionary = _queue[i]
+			_queue.remove_at(i)
+			_fire(q.kind, int(q.hold))
+		else:
+			i += 1
+
+
+func _fire(kind: StringName, hold_frames: int) -> void:
+	if kind == &"crouch":
+		Input.action_press(&"crouch")
+		_release_crouch_at = _frame + 1
+		return
 	if Input.is_action_pressed(&"jump"):
 		Input.action_release(&"jump")
 		_press_at = _frame + 1
@@ -225,27 +291,41 @@ func _press_jump(hold_frames: int) -> void:
 	_release_jump_at = _frame + hold_frames
 
 
-func _tap_crouch() -> void:
-	Input.action_press(&"crouch")
-	_release_crouch_at = _frame + 1
-	_wait_until = _frame + 3
+## 縁のジャンプを早めるフレーム数（道しるべごとに最初に見た時に1回だけ振る）
+func _early_frames(i: int) -> float:
+	if not _early.has(i):
+		_early[i] = rng.randi_range(0, HUMAN_EARLY_MAX)
+	return float(_early[i])
 
 
-## 2 m以上落ちる時は、着地の直前にしゃがんでローリング
+## 2 m以上落ちる時は、着地の直前にしゃがんでローリング。
+## 人の模型は早めに押す：完璧な走りは着地の約0.05 s前に押すので、そこから4〜8フレーム遅らせても着地の±0.05 s に収まって Perfect になってしまう。
+## 人は着地を見越して早めに押す（先行入力は着地の0.2 s前から効く）ので、4〜8フレーム早く押す（遅れると着地後の0.08 sを過ぎて転がれない）
 func _roll_if_needed(pos: Vector3) -> void:
 	var p := player
 	if p.state != Player.State.AIR:
 		_crouched_this_fall = false
+		_roll_early = -1.0
 		_peak_y = pos.y
 		return
 	_peak_y = maxf(_peak_y, pos.y)
 	if p.velocity.y >= 0.0 or _crouched_this_fall:
 		return
-	var q := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 0.1, pos + Vector3.DOWN * 0.6)
+	var reach := 0.6
+	if human:
+		reach = maxf(reach, minf(reach + absf(p.velocity.y) * _roll_early_frames() / 60.0, absf(p.velocity.y) * HUMAN_ROLL_MAX_TIME))
+	var q := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 0.1, pos + Vector3.DOWN * reach)
 	q.exclude = [p.get_rid()]
 	var hit := p.get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty():
 		return
 	if _peak_y - (hit.position as Vector3).y >= p.params.roll_min_drop:
-		_tap_crouch()
+		_act(&"crouch", 1, false)
 	_crouched_this_fall = true
+
+
+## 今回の落下で、ローリングを何フレーム早く押すか（落下ごとに1回だけ振る。着地したら振り直す）
+func _roll_early_frames() -> float:
+	if _roll_early < 0.0:
+		_roll_early = float(rng.randi_range(HUMAN_DELAY_MIN, HUMAN_DELAY_MAX))
+	return _roll_early
