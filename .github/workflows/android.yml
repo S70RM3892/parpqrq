@@ -7,6 +7,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "APK を添付するリリースのタグ（空なら Artifacts にだけ置く）"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -24,10 +29,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Android の部品
-        run: sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+      - name: Android の部品（ランナーに入っている SDK を使う）
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;34.0.0" "platforms;android-34"
 
       - name: Godot と書き出しテンプレート
         run: |
@@ -88,7 +94,8 @@ jobs:
           path: build/android/parkour.apk
 
       - name: リリースに添付
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" build/android/parkour.apk --clobber
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" build/android/parkour.apk --clobber --repo "$GITHUB_REPOSITORY"
