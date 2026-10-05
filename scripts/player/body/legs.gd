@@ -9,7 +9,8 @@ const KNEE_OFFSET := Vector3(0.0, -0.3467, -0.0251)
 const ANKLE_OFFSET := Vector3(0.0, -0.4507, 0.0553)
 const SOLE_BELOW_ANKLE := 0.0825
 const HIP_WIDTH := 0.11
-const BODY_BACK := 0.0    ## 脚の前後位置（+で後ろ）。胴体が無いので真下に置く
+const BODY_BACK := -0.06  ## 脚の前後位置（+で後ろ）。少し前に出して、真下を見た時に腰の前が画面の下に入る
+const SLIDE_LIFT := 0.22  ## スライドでは腰を浮かせて伸ばした脚を画面の下に入れる（体を倒して滑る形）
 
 @export var player: Player
 
@@ -26,6 +27,23 @@ var _cur: Dictionary[StringName, Vector3] = {&"r": Vector3.ZERO, &"l": Vector3.Z
 func _ready() -> void:
 	top_level = true
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	_add_pelvis()
+
+
+## 腰（下を見ると脚が腰から出ている）。手と同じ白い装甲と黒い関節（FirstPersonHand の部品と材質）
+func _add_pelvis() -> void:
+	var st := FirstPersonHand._begin()
+	FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(0, 0.07, 0.0), Vector3.ZERO), Vector3(0.3, 0.17, 0.2), 0.05, FirstPersonHand.JOINT)
+	FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(0, 0.09, -0.098), Vector3(-6.0, 0, 0)), Vector3(0.22, 0.1, 0.02), 0.008, FirstPersonHand.ARMOR)
+	for sx: float in [-1.0, 1.0]:
+		FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(sx * 0.15, 0.05, 0.0), Vector3(0, 0, sx * 8.0)), Vector3(0.02, 0.12, 0.16), 0.008, FirstPersonHand.ARMOR)
+	FirstPersonHand._box(st, FirstPersonHand._xf(Vector3(0, 0.155, 0.0), Vector3.ZERO), Vector3(0.31, 0.016, 0.205), 0.006, FirstPersonHand.ACCENT)
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/hand.gdshader")
+	mi.material_override = mat
+	add_child(mi)
 
 
 func _process(delta: float) -> void:
@@ -49,6 +67,8 @@ func _process(delta: float) -> void:
 		lowest = maxf(lowest, _reach(a))
 	var grounded := player.state in [Player.State.GROUND, Player.State.ROLL, Player.State.HARD_LAND, Player.State.SLIDE]
 	var hip_y := lowest if grounded else KNEE_OFFSET.length() + ANKLE_OFFSET.length() + SOLE_BELOW_ANKLE
+	if player.state == Player.State.SLIDE:
+		hip_y += SLIDE_LIFT
 	var origin := player.get_global_transform_interpolated().origin
 	var b := Basis(Vector3.UP, _yaw)
 	global_transform = Transform3D(b, origin + Vector3.UP * hip_y + b * Vector3(0.0, 0.0, BODY_BACK))
@@ -83,8 +103,8 @@ func _pose(key: StringName, leg_phase: float) -> Vector3:
 			var knee_w := 95.0 * (0.08 + 0.92 * swing_w)
 			return Vector3(hip_w, knee_w, (knee_w - hip_w) * 0.85)
 		Player.State.SLIDE:
-			# 片脚を前に伸ばし、もう片方を畳む（下を見ると前に伸びた脚が見える）
-			return Vector3(75.0, 8.0, 15.0) if right else Vector3(30.0, 115.0, 35.0)
+			# 片脚を前に伸ばして少し浮かせ、もう片方を畳む（前を見ていても伸びた脚が画面の下に入る）
+			return Vector3(100.0, 12.0, 25.0) if right else Vector3(55.0, 100.0, 35.0)
 		Player.State.ROLL:
 			return Vector3(100.0, 140.0, 30.0)
 		Player.State.SWING:

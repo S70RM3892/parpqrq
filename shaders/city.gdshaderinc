@@ -95,7 +95,9 @@ Window city_window(float px, float py, float seed, vec3 view_pos, vec3 tangent, 
 	float far_k = smoothstep(45.0, 110.0, dist);
 	room = mix(room, wall * 0.6, far_k);
 	bool lit = r > 0.5;
-	vec3 lamp = r3 > 0.4 ? vec3(1.0, 0.78, 0.52) : vec3(0.82, 0.9, 1.0);
+	// 部屋ごとの灯りの色温度（電球・昼白色・蛍光灯・テレビの青）と明るさ
+	vec3 lamp = r3 > 0.55 ? vec3(1.0, 0.72, 0.45) : (r3 > 0.3 ? vec3(1.0, 0.9, 0.76) : (r3 > 0.08 ? vec3(0.8, 0.9, 1.0) : vec3(0.5, 0.62, 1.0)));
+	lamp *= 0.6 + 0.7 * r2;
 	// 天井の照明の明るさ（真ん中が明るい）
 	float spot = 1.0;
 	if (!blinds && t == ty && d.y > 0.0) {
@@ -143,7 +145,8 @@ Facade city_facade(int kind, float u, float down, float rnd, vec3 base, vec3 vie
 		} else {
 			vec2 cell = floor(vec2(u / 1.5, down / 3.6));
 			float lit = step(kind == 1 ? 0.45 : 0.8, hash12(vec2(floor(cell.x / 4.0), cell.y) + rnd * 37.0));
-			vec3 office = vec3(0.85, 0.92, 1.0) * (0.7 + 0.3 * hash12(cell + 3.0));
+			float tone = hash12(vec2(floor(cell.x / 4.0), cell.y) + rnd * 5.0);
+			vec3 office = mix(vec3(0.82, 0.9, 1.0), vec3(1.0, 0.86, 0.66), step(0.6, tone)) * (0.6 + 0.5 * hash12(cell + 3.0));
 			f.emission = mix(office * 0.04, office * lit * 1.6, night_k);
 		}
 	} else if (kind == 2) {

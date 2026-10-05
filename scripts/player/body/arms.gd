@@ -161,7 +161,6 @@ func _arm(side: float, theta_deg: float) -> Transform3D:
 	return Transform3D(r * Basis(Vector3.RIGHT, deg_to_rad(HAND_PITCH_DEG)), cuff)
 
 
-## 手のひらを上面の point に、指先を越える向きに合わせた姿勢（カメラ基準）
 ## スイング・ジップライン：バー・線を下から握る。前腕は肩から握る所へ伸び、手のひらは前を向く。
 ## 右手はカメラの右（線が前へ延びるジップラインでは前）に来る
 func _hang(side: float, v: VaultProbe.Result) -> Transform3D:
@@ -179,6 +178,7 @@ func _hang(side: float, v: VaultProbe.Result) -> Transform3D:
 	return Transform3D(b, local_target - b * _palm)
 
 
+## 手のひらを上面の point に、指先を越える向きに合わせた姿勢（カメラ基準）
 func _plant(side: float, v: VaultProbe.Result) -> Transform3D:
 	var cam := get_parent() as Node3D
 	var lateral := v.dir.cross(Vector3.UP).normalized()

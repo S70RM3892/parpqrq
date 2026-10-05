@@ -187,6 +187,7 @@ void fragment() {
 			float border = 1.0 - step(0.03, min(min(a.x, 1.0 - a.x), min(a.y, 1.0 - a.y)) * size.y);
 			e = mix(e, vec3(0.08), border);
 			col = e;
+			e *= 0.42;  // 広告の面は小さな照明より暗く（夜に白く飛ばさない）
 		}
 		emit += e * emission_energy * mix(0.35, 1.0, night);
 	} else if (pattern == 8) {

@@ -83,11 +83,24 @@ func _build() -> void:
 	_joints.append(_finger("thumb", THUMB_ROOT, THUMB_LENGTHS, 0.0108))
 
 
-## 袖・前腕・手のひら（指以外）を1つのメッシュに
+## 二の腕・肘・前腕・手のひら（指以外）を1つのメッシュに
 func _base_mesh() -> ArrayMesh:
 	var st := _begin()
-	# 袖（布）：腕の付け根まで覆い、断面を見せない
-	_capsule(st, Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.26)), 0.052, 0.046, 0.30, 0.82, SLEEVE)
+	# 袖口から肘・二の腕へ：黒い下地に白い装甲の板（ぶら下がると腕が画面に大きく入るので、布の筒にしない）
+	_capsule(st, Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.13)), 0.043, 0.036, 0.15, 0.8, JOINT)
+	_box(st, _xf(Vector3(0, 0.031, 0.05), Vector3(2.0, 0, 0)), Vector3(0.066, 0.016, 0.13), 0.007, ARMOR)
+	for sx: float in [-1.0, 1.0]:
+		_box(st, _xf(Vector3(sx * 0.037, 0.004, 0.055), Vector3.ZERO), Vector3(0.014, 0.042, 0.12), 0.005, ARMOR)
+	# 肘：黒い関節にオレンジの細い輪、肘の当て
+	_capsule(st, Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.19)), 0.048, 0.048, 0.055, 1.0, JOINT)
+	_capsule(st, Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.166)), 0.0495, 0.0495, 0.006, 1.0, ACCENT)
+	_box(st, _xf(Vector3(0, 0.04, 0.165), Vector3(-8.0, 0, 0)), Vector3(0.052, 0.014, 0.045), 0.006, ARMOR)
+	# 二の腕
+	_capsule(st, Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.52)), 0.057, 0.049, 0.33, 0.85, JOINT)
+	_box(st, _xf(Vector3(0, 0.044, 0.35), Vector3(-1.5, 0, 0)), Vector3(0.076, 0.02, 0.27), 0.009, ARMOR)
+	_box(st, _xf(Vector3(0.022, 0.0555, 0.33), Vector3(-1.5, 0, 0)), Vector3(0.01, 0.004, 0.13), 0.002, ACCENT)
+	for sx: float in [-1.0, 1.0]:
+		_box(st, _xf(Vector3(sx * 0.049, 0.006, 0.35), Vector3.ZERO), Vector3(0.016, 0.06, 0.25), 0.006, ARMOR)
 	# 前腕：黒い下地と白い装甲、手首の手前にオレンジの細い帯
 	_capsule(st, Transform3D.IDENTITY, 0.036, 0.029, -WRIST_Z + 0.02, 0.78, JOINT)
 	_box(st, _xf(Vector3(0, 0.022, -0.1), Vector3(-2.5, 0, 0)), Vector3(0.056, 0.016, 0.16), 0.007, ARMOR)
