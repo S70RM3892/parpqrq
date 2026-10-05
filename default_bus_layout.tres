@@ -1,14 +1,11 @@
-[gd_resource type="AudioBusLayout" load_steps=4 format=3]
+[gd_resource type="AudioBusLayout" format=3 uid="uid://gq1p0k8r22nv"]
 
 [sub_resource type="AudioEffectHardLimiter" id="AudioEffectHardLimiter_master"]
 resource_name = "Limiter"
-pre_gain_db = 0.0
 ceiling_db = -1.0
-release = 0.1
 
 [sub_resource type="AudioEffectDelay" id="AudioEffectDelay_room"]
 resource_name = "Slapback"
-dry = 1.0
 tap1_active = false
 tap1_delay_ms = 110.0
 tap1_level_db = -9.0
@@ -17,17 +14,13 @@ tap2_active = false
 tap2_delay_ms = 190.0
 tap2_level_db = -17.0
 tap2_pan = 0.25
-feedback_active = false
 
 [sub_resource type="AudioEffectReverb" id="AudioEffectReverb_room"]
 resource_name = "Room"
 predelay_msec = 10.0
 predelay_feedback = 0.0
 room_size = 0.2
-damping = 0.5
-spread = 1.0
 hipass = 0.1
-dry = 1.0
 wet = 0.08
 
 [resource]
