@@ -49,6 +49,28 @@ func record(id: String) -> Dictionary:
 	}
 
 
+## 全コースの合計 {counts: {"DEV": 数, ...}, cleared: メダルを取ったコース数, courses: コース数, shortcuts: 見つけた近道, shortcuts_total: 近道の総数,
+##  records: {コースID: record()}}（タイトルとコース選択の表示用。メニューを開く時だけ読む）
+func totals() -> Dictionary:
+	var counts: Dictionary = {}
+	for m: String in CourseTimer.MEDALS:
+		counts[m] = 0
+	var recs: Dictionary = {}
+	var cleared := 0
+	var found := 0
+	var total := 0
+	for c: Dictionary in CourseCatalog.COURSES:
+		var r := record(c.id)
+		recs[c.id] = r
+		if r.medal != "":
+			counts[r.medal] = int(counts[r.medal]) + 1
+			cleared += 1
+		found += int(r.shortcuts)
+		total += int(r.shortcuts_total)
+	return {"counts": counts, "cleared": cleared, "courses": CourseCatalog.COURSES.size(), "shortcuts": found,
+			"shortcuts_total": total, "records": recs}
+
+
 ## 「続ける」で始めるコース：最後に遊んだコースにメダルが無ければそれ、あれば次、全部取っていれば最後に遊んだもの
 func recommended() -> String:
 	if last_course == "":

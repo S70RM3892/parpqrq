@@ -49,7 +49,7 @@ func _ready() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override(&"separation", 14)
 	margin.add_child(v)
-	v.add_child(UITheme.label("Settings", 48))
+	v.add_child(UITheme.title_block("Settings", 48))
 	var presets := HBoxContainer.new()
 	presets.add_theme_constant_override(&"separation", 16)
 	presets.add_child(UITheme.button("Motion-sensitive preset", _comfort, 28))
@@ -111,8 +111,13 @@ func _rebuild() -> void:
 		var key: String = r[0]
 		var kind: String = r[2]
 		if kind == "header":
-			var h := UITheme.label(r[1], 24, UITheme.ACCENT)
+			if _list.get_child_count() > 0:
+				var gap := Control.new()
+				gap.custom_minimum_size.y = 10
+				_list.add_child(gap)
+			var h := UITheme.heading(r[1], 26, UITheme.ACCENT)
 			_list.add_child(h)
+			_list.add_child(UITheme.accent_bar(48, 3))
 			continue
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override(&"separation", 18)
@@ -135,6 +140,7 @@ func _rebuild() -> void:
 				var hi: float = 1.0 if kind == "pct" else r[4]
 				var step: float = 0.05 if kind == "pct" else r[5]
 				var box := HBoxContainer.new()
+				box.add_theme_constant_override(&"separation", 16)
 				var sl := HSlider.new()
 				sl.min_value = lo
 				sl.max_value = hi
