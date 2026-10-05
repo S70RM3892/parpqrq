@@ -189,3 +189,55 @@ static func goal_gate(geo: LevelGeometry, xf: Transform3D, w: float) -> void:
 	box(geo, xf, Vector3(0, 5.2, 0), Vector3(w + 1.2, 0.5, 0.6), Mat.LIGHT, NC, LevelStyle.ROUTE_COLOR)
 	# 遠くから見える光の柱
 	box(geo, xf, Vector3(0, 30.0, 0), Vector3(0.5, 50.0, 0.5), Mat.LIGHT, NC | NS, LevelStyle.ROUTE_COLOR)
+
+
+## 床の印（技の導入）：ボタンの印と、障害物の方を指す矢印。文字を使わずに、薄い箱を重ねて描く（当たり判定なし・影なし。材質は白と暗い色だけ）。
+## xf = 印の中心（足元の床）。-Z が障害物の向き。走りながら斜めに見るので、進む向きに長く描く
+## button: jump = 暗い円盤に白い円（ジャンプ）、crouch = 暗い円盤に白い角丸の四角（しゃがみ）、double = 円の印を2つ（2回押す）。
+## arrow_deg = 矢印を左へ傾ける角度（横ウォールランの壁の方へ。負 = 右）
+static func floor_mark(geo: LevelGeometry, xf: Transform3D, button: String, arrow_deg: float = 0.0) -> void:
+	var xs := PackedFloat32Array([-1.15, 1.15]) if button == "double" else PackedFloat32Array([0.0])
+	for cx: float in xs:
+		_mark_ellipse(geo, xf, cx, 0.0, 1.0, 1.0, 0.0, Mat.WHITE)    # 白い縁（暗い床でも見える）
+		_mark_ellipse(geo, xf, cx, 0.0, 0.88, 0.88, 1.0, Mat.DARK)
+		if button == "crouch":
+			_mark_box(geo, xf, Vector3(cx, 0.0, 0.0), Vector2(0.78, 0.5), 2.0, Mat.WHITE)
+			_mark_box(geo, xf, Vector3(cx, 0.0, 0.0), Vector2(0.52, 0.7), 2.0, Mat.WHITE)
+		else:
+			_mark_ellipse(geo, xf, cx, 0.0, 0.4, 0.4, 2.0, Mat.WHITE)
+	# 矢印：ボタンの前（障害物側）。白い縁の上に暗い矢印。尾は z = -1.05、先は z = -3.05（障害物の2 m手前。ボタンの印は3〜6 m手前）
+	var tail := Vector3(0.0, 0.0, -1.05)
+	var rot := Basis(Vector3.UP, deg_to_rad(arrow_deg))
+	for layer: int in 2:
+		var grow := 0.06 if layer == 0 else 0.0
+		var mat: int = Mat.WHITE if layer == 0 else Mat.DARK
+		var h: float = 0.008 * (layer + 1)
+		# 軸
+		_mark_part(geo, xf, tail, rot, Vector3(0.0, 0.0, -0.45), Vector3(0.34 + grow * 2.0, h, 0.9 + grow * 2.0), mat)
+		# 先（三角：幅が細くなる5本の帯）
+		for i: int in 5:
+			var wd := 1.4 - 0.28 * i
+			_mark_part(geo, xf, tail, rot, Vector3(0.0, 0.0, -0.9 - 0.22 * i - 0.11), Vector3(wd + grow * 2.0, h, 0.22 + grow), mat)
+
+
+## 印の楕円（帯を重ねて作る）。center = 印の中心からの横の位置、layer = 重ねる順（高さ）
+static func _mark_ellipse(geo: LevelGeometry, xf: Transform3D, cx: float, cz: float, rx: float, rz: float, layer: float, mat: int) -> void:
+	var n := 11
+	var dz := 2.0 * rz / n
+	for i: int in n:
+		var z := -rz + (i + 0.5) * dz
+		var hw := rx * sqrt(maxf(1.0 - (z / rz) * (z / rz), 0.0))
+		_mark_box(geo, xf, Vector3(cx, 0.0, cz + z), Vector2(maxf(hw * 2.0, 0.05), dz + 0.01), layer, mat)
+
+
+static func _mark_box(geo: LevelGeometry, xf: Transform3D, c: Vector3, size_xz: Vector2, layer: float, mat: int) -> void:
+	var h := 0.008
+	geo.add_box(xf * Vector3(c.x, (layer + 0.5) * h, c.z), Vector3(size_xz.x, h, size_xz.y), mat,
+			Vector3(0.0, rad_to_deg(xf.basis.get_euler().y), 0.0), NC | NS)
+
+
+## 傾けられる矢印の部品：尾 tail を中心に rot で回した位置 local に置く
+static func _mark_part(geo: LevelGeometry, xf: Transform3D, tail: Vector3, rot: Basis, local: Vector3, size: Vector3, mat: int) -> void:
+	var p := tail + rot * local
+	var yaw := rad_to_deg(xf.basis.get_euler().y) + rad_to_deg(rot.get_euler().y)
+	geo.add_box(xf * Vector3(p.x, size.y * 0.5, p.z), size, mat, Vector3(0.0, yaw, 0.0), NC | NS)

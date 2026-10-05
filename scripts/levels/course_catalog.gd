@@ -7,7 +7,9 @@ extends RefCounted
 ## - リズム：同じ間隔で技を置く（ヴォルト→ヴォルト→…）
 ## - 高さで緊張と解放：高所の細い足場 → 大ジャンプで広い屋上へ、を1コースに2〜3回
 ## - 主ルート＋近道：近道は色を付けず、屋上の物（室外機・足場・塔屋と電線・高い壁）の中に隠す。1コースに2〜5本。
-##   エリア1は主ルートで教えた技（走り・ジャンプ・ヴォルト・ローリング）だけで回れる回り込み（detour_*）にする
+##   近道が要る技は、前のコースか同じコースの手前の主ルートで先に教える（intro_* の型。技が初めて出る所の手前の床に印を描く）。
+##   エリア1は走り・ジャンプ・ヴォルト・ローリングだけで通れる近道（detour_jump）にする。近道の型ごとの得は段で決めてある
+##   （人の模型で 段1 0.4〜0.8 / 段2 0.8〜1.6 / 段3 1.6〜3.0 s。docs/BALANCE.md）
 ## メダル（開発者・エース・ゴールド・シルバー・ブロンズ）は自動走行のタイムから決めた（式は tests/course_test.gd の _suggest、表は docs/BALANCE.md）。
 ## 開発者は完璧な走りで近道を全部通った時、エースは人の模型で近道を全部通った時、ゴールド・シルバー・ブロンズは人の模型の主ルートの走りで取れる
 ## （近道を見つけないと開発者・エースには届かない）。
@@ -57,56 +59,56 @@ const AREAS: Array[Dictionary] = [
 const COURSES: Array[Dictionary] = [
 	# --- 1. 朝の屋上（走り・ジャンプ・ヴォルト・ローリング）40〜60秒 ---
 	{"id": "1-1", "area": 0, "name": "First Light", "seed": 101,
-		"motifs": ["intro_jump", "intro_vault", "gap_rhythm", "intro_roll", "vault_rhythm", "turn", "detour_vault", "stairs_up", "release", "vault_rhythm", "detour_jump", "gap_rhythm"],
-		"medals": [35.7, 40.7, 42.0, 49.0, 59.0]},
+		"motifs": ["intro_jump", "intro_vault", "intro_roll", "gap_rhythm", "vault_rhythm", "turn", "detour_jump", "stairs_up", "release", "vault_rhythm", "detour_jump", "gap_rhythm"],
+		"medals": [38.6, 41.6, 44.0, 51.0, 62.0]},
 	{"id": "1-2", "area": 0, "name": "Laundry Lines", "seed": 102,
-		"motifs": ["vault_rhythm", "gap_rhythm", "turn", "detour_jump", "vault_rhythm", "detour_vault", "gap_rhythm", "turn", "detour_swing", "stairs_up", "release", "mix_a"],
-		"medals": [38.8, 41.5, 43.5, 50.0, 61.0]},
+		"motifs": ["vault_rhythm", "gap_rhythm", "turn", "detour_jump", "vault_rhythm", "detour_jump", "gap_rhythm", "turn", "detour_jump", "stairs_up", "release", "mix_a"],
+		"medals": [36.9, 38.8, 41.5, 48.0, 58.0]},
 	{"id": "1-3", "area": 0, "name": "Water Towers", "seed": 103,
-		"motifs": ["gap_rhythm", "detour_vault", "stairs_up", "tension", "turn", "mix_a", "detour_jump", "zip_jog", "vault_rhythm", "release"],
-		"medals": [35.7, 39.9, 45.5, 53.0, 64.0]},
+		"motifs": ["gap_rhythm", "detour_jump", "stairs_up", "tension", "turn", "mix_a", "detour_jump", "vault_rhythm", "detour_jump", "release"],
+		"medals": [35.4, 37.1, 40.0, 46.0, 56.0]},
 	{"id": "1-4", "area": 0, "name": "Sunrise Line", "seed": 104,
-		"motifs": ["mix_a", "detour_swing", "turn", "detour_vault", "tension", "detour_jump", "mix_a", "zip_jog", "stairs_up", "release", "vault_rhythm", "mix_a"],
-		"medals": [40.2, 46.8, 54.0, 62.0, 75.0]},
+		"motifs": ["mix_a", "detour_jump", "turn", "detour_jump", "tension", "detour_jump", "mix_a", "detour_jump", "stairs_up", "release", "vault_rhythm", "mix_a"],
+		"medals": [39.2, 41.7, 45.0, 52.0, 63.0]},
 	# --- 2. 工事中の高層（クライム・レッジグラブ・縦ウォールラン）60〜90秒 ---
 	{"id": "2-1", "area": 1, "name": "Scaffold Steps", "seed": 201,
-		"motifs": ["intro_climb", "gap_rhythm", "intro_ledge", "swing_gap", "intro_wallclimb", "turn", "climb_rhythm", "beam_cross", "kick_wall", "release", "climb_rhythm"],
-		"medals": [42.3, 44.8, 45.5, 53.0, 63.0]},
+		"motifs": ["intro_climb", "gap_rhythm", "intro_ledge", "intro_wallclimb", "intro_swing", "turn", "climb_rhythm", "beam_cross", "detour_jump", "release", "climb_rhythm", "detour_jump"],
+		"medals": [46.7, 48.4, 51.0, 59.0, 71.0]},
 	{"id": "2-2", "area": 1, "name": "Steel Frames", "seed": 202,
-		"motifs": ["climb_rhythm", "swing_gap", "turn", "ledge_rhythm", "kick_wall", "tower", "turn", "gap_rhythm", "climb_rhythm", "detour_jump", "release", "mix_b"],
-		"medals": [51.1, 52.9, 55.0, 64.0, 77.0]},
+		"motifs": ["climb_rhythm", "swing_gap", "turn", "ledge_rhythm", "intro_kick", "tower", "kick_wall", "turn", "gap_rhythm", "climb_rhythm", "detour_jump", "release", "mix_b"],
+		"medals": [58.2, 60.9, 66.5, 77.0, 93.0]},
 	{"id": "2-3", "area": 1, "name": "Crane Yard", "seed": 203,
-		"motifs": ["mix_b", "swing_gap", "turn", "tower", "kick_wall", "climb_rhythm", "zip_jog", "mix_b", "detour_jump", "tower", "vault_rhythm"],
-		"medals": [51.9, 55.7, 62.0, 72.0, 86.0]},
+		"motifs": ["mix_b", "swing_gap", "turn", "tower", "kick_wall", "climb_rhythm", "intro_zip", "zip_jog", "mix_b", "detour_jump", "tower", "vault_rhythm"],
+		"medals": [56.6, 59.7, 68.0, 79.0, 95.0]},
 	{"id": "2-4", "area": 1, "name": "Topping Out", "seed": 204,
-		"motifs": ["climb_rhythm", "kick_wall", "tower", "turn", "swing_gap", "beam_cross", "mix_b", "zip_jog", "detour_vault", "tower", "detour_jump", "climb_rhythm", "release", "mix_b"],
-		"medals": [61.4, 65.0, 72.5, 84.0, 101.0]},
+		"motifs": ["climb_rhythm", "kick_wall", "tower", "turn", "intro_vjump", "swing_gap", "beam_cross", "mix_b", "zip_jog", "detour_vault", "tower", "detour_jump", "climb_rhythm", "release", "mix_b"],
+		"medals": [65.6, 69.0, 79.0, 91.0, 110.0]},
 	# --- 3. 夕方の繁華街（横ウォールラン・壁ジャンプ）60〜90秒 ---
 	{"id": "3-1", "area": 2, "name": "Neon Alley", "seed": 301,
 		"motifs": ["intro_wallrun", "vault_rhythm", "gap_rhythm", "intro_walljump", "zip_jog", "wallrun_rhythm", "climb_rhythm", "detour_wallrun", "release", "wallrun_rhythm"],
-		"medals": [43.6, 47.8, 55.5, 64.0, 77.0]},
+		"medals": [43.4, 47.2, 54.5, 63.0, 76.0]},
 	{"id": "3-2", "area": 2, "name": "Billboard Run", "seed": 302,
 		"motifs": ["wallrun_rhythm", "mix_c", "zip_jog", "alley", "kick_wall", "tower", "detour_wallrun", "turn", "wallrun_rhythm", "detour_vault", "release", "mix_c"],
-		"medals": [52.7, 58.8, 66.5, 77.0, 93.0]},
+		"medals": [51.2, 57.1, 66.5, 77.0, 93.0]},
 	{"id": "3-3", "area": 2, "name": "Rush Hour", "seed": 303,
 		"motifs": ["mix_c", "alley", "zip_jog", "wallrun_rhythm", "swing_gap", "detour_wallrun", "mix_c", "turn", "alley", "detour_vault", "tension", "wallrun_rhythm", "mix_c"],
-		"medals": [54.2, 61.7, 69.5, 80.0, 97.0]},
+		"medals": [55.7, 60.2, 72.5, 84.0, 101.0]},
 	{"id": "3-4", "area": 2, "name": "Last Light", "seed": 304,
 		"motifs": ["wallrun_rhythm", "alley", "mix_c", "zip_jog", "tower", "kick_wall", "detour_wallrun", "mix_b", "turn", "swing_gap", "mix_c", "release", "wallrun_rhythm", "mix_c"],
-		"medals": [66.5, 72.2, 79.0, 92.0, 111.0]},
+		"medals": [66.7, 72.3, 81.5, 94.0, 114.0]},
 	# --- 4. 夜の駅前（スライド・長い下り坂・全部の組み合わせ）90〜150秒 ---
 	{"id": "4-1", "area": 3, "name": "Last Train", "seed": 401,
 		"motifs": ["intro_slide", "vault_rhythm", "intro_slope", "detour_vault", "slide_rhythm", "zip_jog", "wallrun_rhythm", "climb_rhythm", "downhill", "detour_wallrun", "mix_d", "turn", "slide_rhythm", "release", "mix_d"],
-		"medals": [71.4, 76.4, 85.5, 99.0, 120.0]},
+		"medals": [70.5, 74.8, 84.0, 97.0, 117.0]},
 	{"id": "4-2", "area": 3, "name": "Platform Seven", "seed": 402,
 		"motifs": ["mix_d", "downhill", "zip_jog", "alley", "slide_rhythm", "tower", "detour_jump", "mix_d", "swing_gap", "wallrun_rhythm", "downhill", "kick_wall", "slide_rhythm", "release", "mix_d", "mix_c"],
-		"medals": [84.3, 89.2, 98.0, 113.0, 137.0]},
+		"medals": [84.8, 89.4, 99.5, 115.0, 139.0]},
 	{"id": "4-3", "area": 3, "name": "Overpass", "seed": 403,
-		"motifs": ["slide_rhythm", "detour_vault", "turn", "tower", "downhill", "alley", "detour_wallrun", "mix_d", "zip_jog", "mix_b", "downhill", "swing_gap", "tension", "kick_wall", "mix_d", "release", "mix_d"],
-		"medals": [83.4, 88.6, 97.5, 113.0, 136.0]},
+		"motifs": ["slide_rhythm", "detour_vault", "turn", "tower", "downhill", "alley", "mix_d", "detour_wallrun", "zip_jog", "mix_b", "downhill", "turn", "swing_gap", "tension", "kick_wall", "mix_d", "release", "mix_d"],
+		"medals": [85.6, 89.8, 101.0, 117.0, 141.0]},
 	{"id": "4-4", "area": 3, "name": "Terminal", "seed": 404,
 		"motifs": ["mix_d", "downhill", "alley", "zip_jog", "tower", "slide_rhythm", "detour_jump", "mix_c", "turn", "detour_vault", "mix_b", "swing_gap", "detour_wallrun", "tension", "kick_wall", "turn", "slide_rhythm", "downhill", "release", "mix_d"],
-		"medals": [95.7, 100.9, 107.5, 124.0, 150.0]},
+		"medals": [95.3, 99.8, 111.5, 129.0, 156.0]},
 ]
 
 
@@ -178,7 +180,7 @@ class _Gen:
 
 	func add(line: String) -> void:
 		var head := line.get_slice(" ", 0)
-		if head in ["gap", "drop", "up", "ledge", "stairs", "wallrun", "walljump", "beam", "slope"] or head in CourseBuilder.SHORTCUT_STEPS:
+		if head in ["gap", "drop", "up", "ledge", "stairs", "wallrun", "walljump", "beam", "slope", "vjump", "swingbar", "zipline"] or head in CourseBuilder.SHORTCUT_STEPS:
 			out.append("floor " + str(floors[floor_rng.randi() % floors.size()]))
 		out.append(line)
 		# 屋上の高さを追う（上がりすぎ・下がりすぎを避けるため）
@@ -201,6 +203,8 @@ class _Gen:
 				y += f.call(3)
 			"zipjog":
 				y -= 3.0
+			"zipline":
+				y -= f.call(2)
 			"kickwall":
 				y += f.call(1)
 
@@ -234,11 +238,13 @@ class _Gen:
 		match m:
 			"intro_jump":
 				walk(10, 12)
+				add("mark jump")
 				add("gap 2.5")
 				walk(10, 12)
 				add("gap 3.2")
 				walk(10, 12)
 			"intro_vault":
+				add("mark vault")
 				add("vault 1.0 wall")
 				walk(11, 12)
 				add("vault 0.8 wall")
@@ -247,6 +253,7 @@ class _Gen:
 				walk(10, 12)
 			"intro_roll":
 				walk(6, 8)
+				add("mark roll")
 				add("drop 2.5")
 				walk(10, 12)
 				add("gap 4.0 -2.5")
@@ -340,6 +347,7 @@ class _Gen:
 					walk(8, 10)
 			"intro_climb":
 				walk(8, 10)
+				add("mark climb")
 				add("up 1.8")
 				walk(10, 12)
 				add("up 2.2")
@@ -348,15 +356,52 @@ class _Gen:
 				walk(10, 12)
 			"intro_ledge":
 				walk(8, 10)
+				add("mark ledge")
 				add("ledge 3.8 2.6")
 				walk(10, 12)
 				add("drop 3.0")
 				walk(9, 11)
 			"intro_wallclimb":
 				walk(10, 12)
+				add("mark wallclimb")
 				add("up 3.6")
 				walk(10, 12)
 				add("drop 3.5")
+				walk(10, 12)
+			# --- 1.1 の技の導入（主ルートで色付き。cp の直後で単独に出す：失敗してもすぐ戻れる）---
+			"intro_swing":
+				walk(10, 12)
+				add("cp")
+				add("mark swing")
+				add("swingbar %.1f" % rng.randf_range(10.0, 11.0))
+				walk(10, 12)
+				add("swingbar %.1f" % rng.randf_range(10.0, 11.0))
+				walk(10, 12)
+			"intro_kick":
+				walk(10, 12)
+				add("cp")
+				add("mark wallkick")
+				add("up 4.6")
+				walk(8, 10)
+				add("drop 3.0")
+				walk(10, 12)
+				add("up 4.6")
+				walk(8, 10)
+				add("drop 3.0")
+				walk(10, 12)
+			"intro_zip":
+				walk(10, 12)
+				add("cp")
+				add("mark zipline")
+				add("zipline %.1f 3.0" % rng.randf_range(17.0, 19.0))
+				walk(10, 12)
+			"intro_vjump":
+				walk(10, 12)
+				add("cp")
+				add("mark vaultjump")
+				add("vjump 4.8")
+				walk(10, 12)
+				add("vjump 4.8")
 				walk(10, 12)
 			"climb_rhythm":
 				var h1 := rng.randf_range(1.5, 2.3)
@@ -412,12 +457,14 @@ class _Gen:
 				walk(8, 10)
 			"intro_wallrun":
 				walk(10, 12)
+				add("mark wallrun R")
 				add("wallrun 8 R")
 				walk(12, 14)
 				add("wallrun 10 L")
 				walk(12, 14)
 			"intro_walljump":
 				walk(10, 12)
+				add("mark walljump")
 				add("walljump 2 L")
 				walk(12, 14)
 			"wallrun_rhythm":
@@ -445,6 +492,7 @@ class _Gen:
 				walk(8, 10)
 			"intro_slide":
 				walk(10, 12)
+				add("mark slide")
 				add("slide")
 				walk(12, 14)
 				add("slide")
