@@ -12,11 +12,11 @@ const GOOD := Color("#1E9E5A")
 const BAD := Color("#D8402A")
 ## 金属の質感のメダル：[明るい所, 地の色, 暗い所]（MedalIcon が使う）
 const MEDAL_COLORS: Dictionary[String, Color] = {
-	"DEV": Color("#FF6A1A"), "ACE": Color("#BFEFFF"), "GOLD": Color("#EDB422"), "SILVER": Color("#B5BBC6"),
+	"DEV": Color("#8B5CF6"), "ACE": Color("#BFEFFF"), "GOLD": Color("#EDB422"), "SILVER": Color("#B5BBC6"),
 	"BRONZE": Color("#BA7640"),
 }
 const MEDAL_TONES: Dictionary[String, Array] = {
-	"DEV": [Color("#FFB07A"), Color("#FF6A1A"), Color("#8F2F00")],
+	"DEV": [Color("#E2D4FF"), Color("#8B5CF6"), Color("#35197F")],  # 紫（銅・ルートのオレンジと見分ける）
 	"ACE": [Color("#FFFFFF"), Color("#B6EAFB"), Color("#4C93B2")],
 	"GOLD": [Color("#FFF0A8"), Color("#EDB422"), Color("#7E4F00")],
 	"SILVER": [Color("#FFFFFF"), Color("#B5BBC6"), Color("#555C68")],

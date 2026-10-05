@@ -1,7 +1,7 @@
 class_name MedalIcon
 extends Control
 ## メダルの印：金属の円盤（縁・放射状のグラデーション・つや・刻印の1字）。ティアごとに色と形が違う
-## （BRONZE / SILVER / GOLD は丸、ACE は白金で外に輪、DEV はルートカラーのオレンジで歯車の縁）。
+## （BRONZE / SILVER / GOLD は丸、ACE は白金で外に輪、DEV は紫で歯車の縁）。
 ## ルートカラーOFFでクリアしていれば右上に小さな菱形（仕様書 6章）。
 ## flash（0→1）は結果のスタンプで広がる輪と閃光。
 
