@@ -36,6 +36,7 @@ var _speed: Label
 var _perfect: Label
 var _shortcuts: Label
 var _hint: Label
+var _records: Label
 var _retry: Button
 var _next: Button
 var _buttons: Array[Button] = []
@@ -135,6 +136,9 @@ func _ready() -> void:
 	_hint = UITheme.label("", 22, UITheme.MUTED)
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(_hint)
+	_records = UITheme.label("", 22, UITheme.INK)
+	_records.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(_records)
 	# ボタン：リトライを大きく、続きを選ぶ3つを横に並べる
 	_retry = UITheme.button("Retry  (Y / R)", func() -> void: retry_requested.emit(), 36)
 	v.add_child(_retry)
@@ -249,6 +253,18 @@ func show_result(r: Dictionary, has_next: bool) -> void:
 		hint.append("Cleared with route color off.")
 	_hint.text = " ".join(hint)
 	_hint.visible = not hint.is_empty()
+	# 手元の記録表（エースで開く）
+	if bool(r.get("records_open", false)):
+		var tops: PackedStringArray = []
+		var top: PackedFloat32Array = r.get("top", PackedFloat32Array())
+		for i: int in top.size():
+			tops.append("%d. %s" % [i + 1, UITheme.format_time(top[i])])
+		var sob: float = r.get("sum_best", INF)
+		_records.text = "TOP  " + "   ".join(tops) + (("\nSUM OF BEST SPLITS  " + UITheme.format_time(sob)) if sob < INF else "")
+		_records.add_theme_color_override(&"font_color", UITheme.INK)
+	else:
+		_records.text = "Take ACE to open your records table."
+		_records.add_theme_color_override(&"font_color", UITheme.MUTED)
 	_next.visible = has_next
 	var again := is_same(r, _last) or r.hash() == _last.hash()
 	_last = r

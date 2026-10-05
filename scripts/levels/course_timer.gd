@@ -47,6 +47,10 @@ var _best: float = INF
 ## このコースをゴールした回数（保存する。近道の目印の条件）
 var _finishes: int = 0
 var _best_splits: PackedFloat32Array = []
+## 手元の記録表（エースで開く）：上位 TOP_KEEP 本のタイムと、区間ごとの最速（つなぐと理論上のベスト）
+const TOP_KEEP := 5
+var _top: PackedFloat32Array = []
+var _seg_best: PackedFloat32Array = []
 var _splits: PackedFloat32Array = []
 var _shown: float = 0.0
 var _max_speed: float = 0.0
@@ -259,6 +263,7 @@ func _on_goal_entered(body: Node3D) -> void:
 		_best = t
 		_best_splits = _splits.duplicate()
 		best_run = last_run
+	_add_record(t)
 	var route_off := not Settings.route_color
 	_save(new_best, route_off)
 	var next := _next_medal(t)
@@ -270,6 +275,7 @@ func _on_goal_entered(body: Node3D) -> void:
 		"shortcuts_used": _found_run.size(), "new_shortcuts": _new_run,
 		"hint_on": hint_for(_best, medal_times, _finishes) and _found.size() < shortcuts.size(),
 		"dev_ghost": dev_ghost_unlocked(), "dev_time": dev_time,
+		"records_open": medal_times.size() > 1 and _best <= medal_times[1], "top": _top.duplicate(), "sum_best": sum_of_best(),
 	}
 	if show_result_label:
 		var lines: PackedStringArray = []
@@ -282,16 +288,47 @@ func _on_goal_entered(body: Node3D) -> void:
 	finished.emit(last_result)
 
 
+## 上位のタイムと区間ごとの最速を更新する
+func _add_record(t: float) -> void:
+	_top.append(t)
+	_top.sort()
+	if _top.size() > TOP_KEEP:
+		_top.resize(TOP_KEEP)
+	var segs := PackedFloat32Array()
+	var prev := 0.0
+	for s: float in _splits:
+		segs.append(s - prev)
+		prev = s
+	segs.append(t - prev)
+	if _seg_best.size() != segs.size():
+		_seg_best = segs
+	else:
+		for i: int in segs.size():
+			_seg_best[i] = minf(_seg_best[i], segs[i])
+
+
+## 区間ごとの最速をつないだタイム（まだ無ければ INF）
+func sum_of_best() -> float:
+	if _seg_best.is_empty():
+		return INF
+	var sum := 0.0
+	for v: float in _seg_best:
+		sum += v
+	return sum
+
+
 ## 記録を別のIDで取り直す（スモークテストが持ち主の自己ベストを上書きしない）
 func use_records(id: String, clear: bool) -> void:
 	course_id = id
 	_best = INF
 	_best_splits = []
+	_top = []
+	_seg_best = []
 	best_run = RunRecording.new()
 	if clear:
 		var cfg := ConfigFile.new()
 		if cfg.load(SAVE_PATH) == OK:
-			for section: String in ["best", "splits", "route_off", "shortcuts", "finishes"]:
+			for section: String in ["best", "splits", "route_off", "shortcuts", "finishes", "top", "seg_best"]:
 				if cfg.has_section_key(section, id):
 					cfg.erase_section_key(section, id)
 			cfg.save(SAVE_PATH)
@@ -440,6 +477,8 @@ func _load() -> void:
 		_best = cfg.get_value("best", course_id, INF)
 		_finishes = int(cfg.get_value("finishes", course_id, 0))
 		_best_splits = cfg.get_value("splits", course_id, PackedFloat32Array())
+		_top = cfg.get_value("top", course_id, PackedFloat32Array())
+		_seg_best = cfg.get_value("seg_best", course_id, PackedFloat32Array())
 		for n: String in cfg.get_value("shortcuts", course_id, PackedStringArray()):
 			_found[n] = true
 	if FileAccess.file_exists(_ghost_path()):
@@ -459,6 +498,8 @@ func _save(new_best: bool, route_off: bool) -> void:
 		cfg.set_value("splits", course_id, _best_splits)
 	if route_off:
 		cfg.set_value("route_off", course_id, true)
+	cfg.set_value("top", course_id, _top)
+	cfg.set_value("seg_best", course_id, _seg_best)
 	cfg.save(SAVE_PATH)
 	if new_best:
 		var f := FileAccess.open(_ghost_path(), FileAccess.WRITE)
