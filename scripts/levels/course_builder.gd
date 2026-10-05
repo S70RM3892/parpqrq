@@ -393,6 +393,15 @@ func _close_floor(extra: float = 0.0, end_clear: float = 1.5) -> void:
 		for side: float in [-1.0, 1.0]:
 			var c := center + right() * side * (_floor_width * 0.5 - 0.15) + Vector3.UP * 0.25
 			geo.add_box(Vector3(c.x, top + 0.25, c.z), Vector3(0.3, 0.5, length), Mat.WHITE, Vector3(0, yaw_deg, 0), 0, _floor_tint)
+			# 笠木（金属の板が少し張り出す）と、内側の足元の水切り。見た目だけ
+			geo.add_box(Vector3(c.x, top + 0.525, c.z), Vector3(0.38, 0.05, length + 0.04), Mat.METAL, Vector3(0, yaw_deg, 0), NC)
+			var base := c - right() * side * 0.16
+			geo.add_box(Vector3(base.x, top + 0.06, base.z), Vector3(0.03, 0.12, length - 0.02), Mat.METAL, Vector3(0, yaw_deg, 0),
+					NC | LevelGeometry.NO_SHADOW, Color(0.62, 0.62, 0.62))
+			# 排水口（8 m おき）
+			for k: int in int(length / 8.0):
+				var dc := _floor_start + dir() * (4.0 + k * 8.0) + right() * side * (_floor_width * 0.5 - 0.33)
+				geo.add_box(Vector3(dc.x, top + 0.05, dc.z), Vector3(0.06, 0.1, 0.35), Mat.DARK, Vector3(0, yaw_deg, 0), NC | LevelGeometry.NO_SHADOW)
 	_decor.append({"start": _floor_start, "end": end, "yaw": yaw, "w": _floor_width, "y": top, "parapet": _floor_parapet,
 			"end_clear": end_clear})
 

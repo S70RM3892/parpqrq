@@ -30,6 +30,15 @@ shoot a4_4-2 --course=4-2 --at=6,20,35,55 --shortcuts
 shoot a4_4-4_down --course=4-4 --at=12 --pitch=-55
 shoot a1_1-1_up --course=1-1 --at=8 --pitch=25
 shoot free --course=free_run --at=2.5 --pitch=-10
+# 技の最中の手（状態に入ってから数フレーム後）
+shoot hand_vault --course=1-1 --when=VAULT --delay=6
+shoot hand_ledge --course=2-1 --when=LEDGE_HANG --delay=2
+shoot hand_swing --course=2-1 --when=SWING --delay=6
+shoot hand_zip --course=2-3 --when=ZIPLINE --delay=40
+shoot hand_wallrun --course=3-1 --when=WALL_RUN --delay=15
+shoot hand_slide --course=4-1 --when=SLIDE --delay=10
+# 開発者のゴースト（金を取った記録で走る）
+shoot ghost_1-3 --course=1-3 --at=5 --fake-records
 shoot ui_title --title=main --fake-records
 shoot ui_courses --title=courses --fake-records
 shoot ui_controls --title=controls

@@ -8,6 +8,8 @@ extends Node
 ## 既定 80 で演出の後、10 なら数え上げの途中）。--pause=menu|settings は最初の --at で一時停止（か、その中の設定）を撮る。--pitch=度 で撮る瞬間だけ上下を向く。
 ## --fake-records は見本の記録（各ティアのメダル・近道・ゴースト）を書いてから撮る（終わったら元の記録に戻す。メダルの表示の確認用）。
 ## 20:9（Android のフラッグシップ機：2400×1080）は xvfb の画面と --resolution を変える（tools/gallery.sh の wide）。
+## --when=SWING,ZIPLINE は --at の代わりに、その状態（Player.State の名前）に順に入ってから --delay=N フレーム（既定 12）後を撮る（手の形の確認用）。
+## 反射プローブのあるコースは、走り出す前にプローブが撮り終わるまで描画する（ゲーム中は走り出して数秒で揃う）。
 ## --thumb=<出力.jpg> はコース選択のカードの絵：最初の --at の画面から UI を消し、480×270 に縮めて JPG で書く（tools/thumbs.sh が全コースを撮り直す）。
 
 const COURSE_SCENE := preload("res://scenes/levels/course.tscn")
@@ -27,6 +29,8 @@ var _fake_records: bool = false
 var _fake_ghosts: PackedStringArray = []
 var _stats: PackedStringArray = []
 var _frame: int = 0
+var _when: PackedStringArray = []
+var _delay: int = 12
 
 
 func _ready() -> void:
@@ -51,6 +55,10 @@ func _ready() -> void:
 			_pause = a.trim_prefix("--pause=")
 		elif a == "--fake-records":
 			_fake_records = true
+		elif a.begins_with("--when="):
+			_when = a.trim_prefix("--when=").split(",")
+		elif a.begins_with("--delay="):
+			_delay = a.trim_prefix("--delay=").to_int()
 		elif a.begins_with("--rframes="):
 			_rframes = a.trim_prefix("--rframes=").to_int()
 	DirAccess.make_dir_recursive_absolute(_out.get_base_dir())
@@ -132,11 +140,31 @@ func _shoot_course() -> void:
 	if course.timer != null:
 		course.timer.use_records("gallery_" + _course_id, true)
 	var p := course.player
+	# 反射プローブは1フレームに1つずつ、1つ数フレームかけて撮られる
+	var probes := course.find_children("*", "ReflectionProbe", true, false).size()
+	if probes > 0:
+		_render(true)
+		for i: int in probes * 9 + 4:
+			await get_tree().process_frame
 	var bot := Autopilot.new()
 	add_child(bot)
 	bot.start(p, course.builder.route(_shortcuts))
 	var n := 0
-	for target: float in _at:
+	for st: String in _when:
+		_render(false)
+		var want := Player.State.keys().find(st)
+		if want < 0 or not await _run_until(bot, func() -> bool: return p.state == want):
+			print("gallery: state %s not reached" % st)
+			break
+		_render(true)
+		var stop := _frame + _delay
+		if not await _run_until(bot, func() -> bool: return _frame >= stop):
+			break
+		await _capture(n, "when %s +%d frames: t=%.1fs state %s speed %.1f m/s" % [st, _delay, _frame / 60.0,
+				Player.State.keys()[p.state], p.horizontal_speed()])
+		n += 1
+	var times := _at if _when.is_empty() else PackedFloat32Array()
+	for target: float in times:
 		_render(false)
 		if not await _run_until(bot, func() -> bool: return _frame >= roundi(target * 60.0) - WARM_FRAMES):
 			break
