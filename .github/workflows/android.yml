@@ -1,0 +1,94 @@
+# Android の APK を作り、リリースに添付する（リリースを公開した時、または Actions の画面から手で実行）。
+# 署名：Secrets に ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_ALIAS / ANDROID_KEYSTORE_PASSWORD があれば本番の鍵、
+# 無ければデバッグ用の鍵（その場で作る）。
+name: Android APK
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.7.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Android の部品
+        run: sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+
+      - name: Godot と書き出しテンプレート
+        run: |
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          tpl=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$tpl"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d /tmp/tpl
+          mv /tmp/tpl/templates/* "$tpl/"
+          rm -f Godot_v*.zip Godot_v*.tpz
+
+      - name: 署名の鍵とエディタの設定
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -alias androiddebugkey -storepass android \
+            -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p ~/.config/godot
+          for v in 4 4.7; do
+            cat > ~/.config/godot/editor_settings-$v.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_SDK_ROOT"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$RUNNER_TEMP/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+          done
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            {
+              echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/release.keystore"
+              echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$KS_ALIAS"
+              echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KS_PASS"
+              echo "EXPORT_MODE=--export-release"
+            } >> "$GITHUB_ENV"
+          else
+            echo "EXPORT_MODE=--export-debug" >> "$GITHUB_ENV"
+          fi
+
+      - name: 取り込みと書き出し
+        run: |
+          godot --headless --path . --import || true
+          mkdir -p build/android
+          godot --headless --path . $EXPORT_MODE Android build/android/parkour.apk
+          ls -lh build/android/parkour.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parkour-apk
+          path: build/android/parkour.apk
+
+      - name: リリースに添付
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" build/android/parkour.apk --clobber
